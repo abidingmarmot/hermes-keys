@@ -1,6 +1,8 @@
-# Hermes Keys — local Acts (wave A)
+# Hermes Keys
 
 An independently written **GPLv3** agent integration on the [HeliBoard](https://github.com/HeliBorg/HeliBoard) fork at upstream commit `0c60dff`, retaining OpenBoard/AOSP provenance, notices, and licenses. This is not an upstream HeliBoard release. Application ID: `dev.abidingmarmot.hermeskeys` (`.debug` for debug builds); it coexists with HeliBoard. The existing launcher artwork remains upstream's CC-BY-SA artwork (credits below); the Agent conversation and Acts list icons are original GPLv3 work. No proprietary implementation or artwork was used.
+
+**New to the AI features? Start with the [connection and troubleshooting guide](docs/SETUP.md).** The [roadmap](docs/ROADMAP.md) distinguishes shipped features from self-hosting, alternative agents, device sync, and release work still planned.
 
 Ordinary typing remains offline. This fork adds Android's install-time **INTERNET** permission solely for an explicitly invoked agent request. Android does not offer a runtime INTERNET permission prompt: the additional **application opt-in** below is required. No endpoint, token, backend, or account is supplied.
 
