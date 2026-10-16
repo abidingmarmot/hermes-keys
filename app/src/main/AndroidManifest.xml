@@ -54,6 +54,9 @@ SPDX-License-Identifier: Apache-2.0 AND GPL-3.0-only
         </service>
 
         <!-- Activities -->
+        <activity android:name="helium314.keyboard.latin.agent.LocalActsActivity"
+            android:theme="@style/platformActivityTheme" android:exported="false"
+            android:directBootAware="false" android:excludeFromRecents="true" />
         <activity android:name="helium314.keyboard.latin.agent.AgentSettingsActivity"
             android:theme="@style/platformActivityTheme" android:exported="false"
             android:directBootAware="false" android:excludeFromRecents="true" />

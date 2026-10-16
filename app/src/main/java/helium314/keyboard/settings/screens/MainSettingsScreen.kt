@@ -19,6 +19,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import helium314.keyboard.latin.R
 import helium314.keyboard.latin.agent.AgentSettingsActivity
+import helium314.keyboard.latin.agent.LocalActsActivity
 import helium314.keyboard.latin.utils.JniUtils
 import helium314.keyboard.latin.utils.SubtypeLocaleUtils.displayName
 import helium314.keyboard.latin.utils.SubtypeSettings
@@ -72,6 +73,13 @@ fun MainSettingsScreen(
                     name = stringResource(R.string.settings_screen_appearance),
                     onClick = onClickAppearance,
                     icon = R.drawable.ic_settings_appearance
+                ) { NextScreenIcon() }
+                Preference(
+                    name = stringResource(R.string.acts_settings),
+                    onClick = {
+                        context.startActivity(Intent(context, LocalActsActivity::class.java))
+                    },
+                    icon = R.drawable.ic_acts
                 ) { NextScreenIcon() }
                 Preference(
                     name = stringResource(R.string.agent_settings),

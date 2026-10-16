@@ -50,7 +50,40 @@ class AgentController(private val ime: LatinIME) {
         Settings.getValues().mIncognitoModeEnabled, ime.currentInputConnection != null)
         && !(ime.getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager).isKeyguardLocked
 
-    fun show() {
+    fun showActs() {
+        invalidate()
+        if (!allowed()) { toast(R.string.agent_blocked); return }
+        if (Build.VERSION.SDK_INT < 23) { toast(R.string.agent_requires_23); return }
+        // Capture before opening the picker; never silently retarget an Act to a changed editor.
+        val connection = ime.currentInputConnection ?: return
+        val editor = ime.currentInputEditorInfo
+        val snapshot = AgentEditor.capture(connection)
+        if (snapshot == null || runCatching { snapshot.prompt() }.isFailure) {
+            toast(R.string.acts_input_error); return
+        }
+        val acts = runCatching { LocalActs.ordered(LocalActStore(ime).load()) }.getOrNull()
+        if (acts == null) { toast(R.string.acts_storage_error); return }
+        selectionStart = snapshot.start
+        selectionEnd = snapshot.end
+        val session = generation
+        val picker = AlertDialog.Builder(getPlatformDialogThemeContext(ime))
+            .setTitle(R.string.acts_picker)
+            .setItems(acts.map { if (it.pinned) ime.getString(R.string.acts_pinned_name, it.name) else it.name }.toTypedArray()) { _, index ->
+                if (session != generation || !allowed() || ime.currentInputConnection !== connection ||
+                    ime.currentInputEditorInfo !== editor || AgentEditor.capture(connection) != snapshot) {
+                    invalidate(); toast(R.string.agent_blocked)
+                } else show(acts[index], snapshot)
+            }
+            .setNeutralButton(R.string.acts_settings) { _, _ ->
+                invalidate()
+                ime.startActivity(Intent(ime, LocalActsActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            }
+            .setNegativeButton(android.R.string.cancel) { _, _ -> invalidate() }.create()
+        if (acts.isEmpty()) picker.setMessage(ime.getString(R.string.acts_empty))
+        display(picker)
+    }
+
+    @JvmOverloads fun show(act: LocalAct? = null, expected: AgentEditor.Snapshot? = null) {
         invalidate()
         if (!allowed()) { toast(R.string.agent_blocked); return }
         if (Build.VERSION.SDK_INT < 23) { toast(R.string.agent_requires_23); return }
@@ -67,8 +100,14 @@ class AgentController(private val ime: LatinIME) {
         val connection = ime.currentInputConnection ?: return
         val editor = ime.currentInputEditorInfo
         val snapshot = AgentEditor.capture(connection)
-        val prompt = runCatching { snapshot?.prompt() }.getOrNull()
-        if (snapshot == null || prompt == null) { toast(R.string.agent_prompt_limit); return }
+        val prompt = runCatching {
+            require(expected == null || expected == snapshot)
+            val input = requireNotNull(snapshot).prompt()
+            if (act == null) input else LocalActs.expand(act, input)
+        }.getOrNull()
+        if (snapshot == null || prompt == null) {
+            toast(if (act == null) R.string.agent_prompt_limit else R.string.acts_input_error); return
+        }
         selectionStart = snapshot.start
         selectionEnd = snapshot.end
         val session = generation
@@ -76,10 +115,10 @@ class AgentController(private val ime: LatinIME) {
             && ime.currentInputEditorInfo === editor
         val content = TextView(getPlatformDialogThemeContext(ime)).apply {
             setPadding(24, 16, 24, 16)
-            text = ime.getString(R.string.agent_send_preview, config.base, prompt)
+            text = ime.getString(R.string.agent_send_preview, AgentProtocol.endpoint(config.base).toString(), prompt)
         }
         val preview = AlertDialog.Builder(getPlatformDialogThemeContext(ime))
-            .setTitle(R.string.agent).setView(ScrollView(ime).apply { addView(content) })
+            .setTitle(act?.name ?: ime.getString(R.string.agent)).setView(ScrollView(ime).apply { addView(content) })
             .setPositiveButton(R.string.agent_send, null)
             .setNegativeButton(android.R.string.cancel) { _, _ -> invalidate() }.create()
         if (!display(preview)) return

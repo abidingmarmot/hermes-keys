@@ -82,6 +82,8 @@ class AgentCredentials(context: Context) {
     }
 
     private fun key(create: Boolean): SecretKey {
+        // Keep the API guard local so lint and runtime both enforce the Keystore minimum.
+        if (Build.VERSION.SDK_INT < 23) throw IllegalStateException("Keystore requires Android 6")
         val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
         (store.getKey(ALIAS, null) as? SecretKey)?.let { return it }
         check(create)

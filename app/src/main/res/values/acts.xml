@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<resources>
+    <!-- English-only fork UI; explicitly use these strings as the fallback in every locale. -->
+    <string name="acts" translatable="false">Acts</string>
+    <string name="acts_privacy" translatable="false">Private local prompt shortcuts, not scripts. Stored encrypted on this device, excluded from backups and settings exports. App updates keep Acts; uninstall or clearing app data deletes them. Pinned Acts appear first in the picker. Built-in examples are editable copies.</string>
+    <string name="acts_template_help" translatable="false">Use exactly one literal {input} placeholder. It is replaced once with selected text, or text before the cursor. The final prompt must fit 4000 characters. Definitions are instructions only: do not put credentials or URLs here. Send and Insert each require confirmation.</string>
+    <string name="acts_name" translatable="false">Name (1–48 characters, unique)</string>
+    <string name="acts_template" translatable="false">Instruction template (up to 2000 characters)</string>
+    <string name="acts_add" translatable="false">Add Act (maximum 32)</string>
+    <string name="acts_edit" translatable="false">Edit Act</string>
+    <string name="acts_edit_named" translatable="false">Edit %1$s</string>
+    <string name="acts_pin_named" translatable="false">Pin %1$s</string>
+    <string name="acts_delete_named" translatable="false">Delete %1$s</string>
+    <string name="acts_delete" translatable="false">Delete Act</string>
+    <string name="acts_delete_confirm" translatable="false">Permanently delete “%1$s” from this device? This cannot be undone.</string>
+    <string name="acts_save" translatable="false">Save Act</string>
+    <string name="acts_empty" translatable="false">No Acts. Add one in Acts settings.</string>
+    <string name="acts_validation_error" translatable="false">Not saved. Use a unique name, exactly one {input}, and stay within the limits. URLs and recognizable credential assignments are forbidden. If valid, unlock the device and check storage availability.</string>
+    <string name="acts_storage_error" translatable="false">Acts unavailable. Unlock the device and try again. Keystore or stored data could not be read; nothing was overwritten.</string>
+    <string name="acts_input_error" translatable="false">Select text or compose text before the cursor first. The expanded prompt must be 1–4000 characters; nothing is truncated or sent.</string>
+    <string name="acts_picker" translatable="false">Choose an Act (pinned first)</string>
+    <string name="acts_pinned_name" translatable="false">Pinned: %1$s</string>
+    <string name="acts_settings" translatable="false">Manage local Acts</string>
+</resources>

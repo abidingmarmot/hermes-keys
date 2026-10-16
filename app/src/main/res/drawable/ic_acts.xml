@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-only; original list-of-prompts icon -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+    <path android:fillColor="#FF000000"
+        android:pathData="M3,4h4v4h-4zM10,5h11v2h-11zM3,10h4v4h-4zM10,11h11v2h-11zM3,16h4v4h-4zM10,17h11v2h-11z" />
+</vector>
