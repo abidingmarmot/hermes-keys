@@ -20,6 +20,8 @@ object LocalActs {
     fun validate(act: LocalAct) {
         require(UUID.fromString(act.id).toString() == act.id)
         require(act.name.length in 1..MAX_NAME && act.name == act.name.trim())
+        requireWellFormedUtf16(act.name)
+        requireWellFormedUtf16(act.template)
         require(act.name.none { it.isISOControl() })
         require(act.template.length in 1..MAX_TEMPLATE && act.template.isNotBlank())
         require(act.template.none { it.isISOControl() && it != '\n' && it != '\t' })
@@ -32,6 +34,17 @@ object LocalActs {
         require(!Regex("bearer\\s+\\S+|(?:api[_ -]?key|token|password|secret)\\s*[:=]\\s*\\S+|-----BEGIN .*PRIVATE KEY|\\b(?:sk-|ghp_)[a-z0-9_-]{8,}",
             // The literal input placeholder is not a saved credential value.
             RegexOption.IGNORE_CASE).containsMatchIn(text.replace(INPUT, "")))
+    }
+
+    private fun requireWellFormedUtf16(text: String) {
+        var index = 0
+        while (index < text.length) {
+            val char = text[index++]
+            when {
+                char.isHighSurrogate() -> require(index < text.length && text[index++].isLowSurrogate())
+                char.isLowSurrogate() -> throw IllegalArgumentException("Unpaired surrogate")
+            }
+        }
     }
 
     fun validateAll(acts: List<LocalAct>) {

@@ -3,6 +3,7 @@ package helium314.keyboard.latin.agent
 
 import android.app.Activity
 import android.app.AlertDialog
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.text.InputFilter
@@ -24,6 +25,9 @@ import java.util.UUID
 class LocalActsActivity : Activity() {
     private lateinit var store: LocalActStore
     private lateinit var form: LinearLayout
+    private var awaitingDocument = false
+    private var importGeneration = 0
+    private var documentRead: LocalActDocumentReader.Read? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(null)
@@ -63,6 +67,9 @@ class LocalActsActivity : Activity() {
     }
 
     private fun showList() {
+        documentRead?.cancel()
+        documentRead = null
+        importGeneration++
         page(R.string.acts)
         label(getString(R.string.acts_privacy))
         val acts = runCatching { store.load() }.getOrNull()
@@ -70,10 +77,12 @@ class LocalActsActivity : Activity() {
             label(getString(if (Build.VERSION.SDK_INT < 23) R.string.agent_requires_23 else R.string.acts_storage_error))
         } else {
             button(getString(R.string.acts_add)) { edit(null) }.isEnabled = acts.size < LocalActs.MAX_COUNT
+            button(getString(R.string.acts_import)) { pickDocument() }.isEnabled = acts.size < LocalActs.MAX_COUNT
             if (acts.isEmpty()) label(getString(R.string.acts_empty))
             LocalActs.ordered(acts).forEach { act ->
                 label(act.name).textSize = 18f
                 button(getString(R.string.acts_edit_named, act.name)) { edit(act) }
+                button(getString(R.string.acts_share_named, act.name)) { previewShare(act) }
                 form.addView(CheckBox(this).apply {
                     text = getString(R.string.acts_pin_named, act.name)
                     isSaveEnabled = false
@@ -142,6 +151,111 @@ class LocalActsActivity : Activity() {
             if (saved) showList() else status.setText(R.string.acts_validation_error)
         }
         button(getString(android.R.string.cancel)) { showList() }
+    }
+
+    private fun previewShare(act: LocalAct) {
+        val payload = runCatching { LocalActTransfer.encode(act) }.getOrElse {
+            label(getString(R.string.acts_transfer_error))
+            return
+        }
+        page(R.string.acts_share)
+        label(getString(R.string.acts_share_warning))
+        label(payload) // Exact plaintext that will become EXTRA_TEXT, not a summary.
+        val status = label("")
+        button(getString(R.string.acts_share_confirm)) {
+            val shared = runCatching {
+                // Fail closed if storage became unavailable or this preview became stale.
+                require(store.load().any { it.id == act.id && it.name == act.name && it.template == act.template })
+                val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, payload)
+                startActivity(Intent.createChooser(send, getString(R.string.acts_share)))
+            }.isSuccess
+            if (shared) showList() else status.setText(R.string.acts_transfer_error)
+        }
+        button(getString(android.R.string.cancel)) { showList() }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun pickDocument() {
+        if (awaitingDocument) return
+        if (LocalActDocumentReader.isBusy()) {
+            label(getString(R.string.acts_import_busy))
+            return
+        }
+        awaitingDocument = true
+        val opened = runCatching {
+            startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = "*/*"
+                putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("application/json", "text/plain"))
+                putExtra(Intent.EXTRA_LOCAL_ONLY, true)
+            }, IMPORT_DOCUMENT)
+        }.isSuccess
+        if (!opened) {
+            awaitingDocument = false
+            label(getString(R.string.acts_transfer_error))
+        }
+    }
+
+    @Deprecated("Uses the native Activity result callback for this single local picker")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != IMPORT_DOCUMENT || !awaitingDocument || isFinishing || isDestroyed) return
+        awaitingDocument = false
+        if (resultCode != RESULT_OK) return
+        val uri = data?.data
+        // Never accept file paths, remote URLs, clip-data batches or unsolicited callbacks.
+        if (uri?.scheme != "content" || data.clipData != null ||
+            runCatching { store.load() }.isFailure) {
+            label(getString(R.string.acts_transfer_error))
+            return
+        }
+        page(R.string.acts_import)
+        label(getString(R.string.acts_import_warning))
+        label(getString(R.string.acts_import_reading))
+        val generation = ++importGeneration
+        button(getString(android.R.string.cancel)) { showList() }
+        documentRead = LocalActDocumentReader.start(applicationContext.contentResolver, uri) { result ->
+            if (generation == importGeneration && !isFinishing && !isDestroyed) {
+                documentRead = null
+                val act = result.getOrNull()
+                if (act == null) {
+                    showList()
+                    label(getString(if (result.exceptionOrNull() is LocalActDocumentReader.Timeout)
+                        R.string.acts_import_timeout else R.string.acts_transfer_error))
+                } else previewImport(act)
+            }
+        }
+        if (documentRead == null) {
+            showList()
+            label(getString(R.string.acts_import_busy))
+        }
+    }
+
+    private fun previewImport(act: LocalAct) {
+        page(R.string.acts_import)
+        label(getString(R.string.acts_import_warning))
+        label(getString(R.string.acts_name))
+        label(act.name)
+        label(getString(R.string.acts_template))
+        label(act.template)
+        val status = label("")
+        button(getString(R.string.acts_import_confirm)) {
+            val saved = runCatching { store.update { LocalActTransfer.addNew(it, act) } }.isSuccess
+            if (saved) showList() else status.setText(R.string.acts_transfer_error)
+        }
+        button(getString(android.R.string.cancel)) { showList() }
+    }
+
+    override fun onDestroy() {
+        awaitingDocument = false
+        importGeneration++
+        documentRead?.cancel()
+        documentRead = null
+        super.onDestroy()
+    }
+
+    private companion object {
+        const val IMPORT_DOCUMENT = 1001
     }
 
     override fun onSaveInstanceState(outState: Bundle) {

@@ -11,6 +11,9 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.FileNotFoundException
+import java.nio.ByteBuffer
+import java.nio.CharBuffer
+import java.nio.charset.CodingErrorAction
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -19,7 +22,8 @@ import javax.crypto.spec.GCMParameterSpec
 
 /** Same AES-GCM/Keystore + AtomicFile pattern as AgentCredentials, with a separate key/file.
  * The keyboard defaults to device-protected storage; encrypted Acts remain unavailable until unlock.
- * No preferences, exports, intents, logs, or Android saved-state contain Acts.
+ * No preferences, settings exports, logs, or Android saved-state contain Acts.
+ * Only explicit, confirmed single-Act sharing exposes name/template plaintext via an intent.
  */
 class LocalActStore internal constructor(context: Context, private val keyProvider: ((Boolean) -> SecretKey)?) {
     constructor(context: Context) : this(context, null)
@@ -61,7 +65,10 @@ class LocalActStore internal constructor(context: Context, private val keyProvid
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.DECRYPT_MODE, key(false), GCMParameterSpec(128, bytes.copyOfRange(0, 12)))
         val plain = cipher.doFinal(bytes.copyOfRange(12, bytes.size))
-        val root = try { JSONObject(String(plain, Charsets.UTF_8)) } finally { plain.fill(0) }
+        val root = try {
+            JSONObject(Charsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
+                .onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(plain)).toString())
+        } finally { plain.fill(0) }
         require(root.getInt("version") == 1)
         val array = root.getJSONArray("acts")
         require(array.length() <= LocalActs.MAX_COUNT)
@@ -77,7 +84,14 @@ class LocalActStore internal constructor(context: Context, private val keyProvid
         val array = JSONArray()
         acts.forEach { array.put(JSONObject().put("id", it.id).put("name", it.name)
             .put("template", it.template).put("pinned", it.pinned)) }
-        val plain = JSONObject().put("version", 1).put("acts", array).toString().toByteArray(Charsets.UTF_8)
+        // Never replace malformed UTF-16 with '?' and commit text different from the reviewed Act.
+        // Encode before touching AtomicFile, independently of shared definition validation.
+        val encoded = Charsets.UTF_8.newEncoder().onMalformedInput(CodingErrorAction.REPORT)
+            .onUnmappableCharacter(CodingErrorAction.REPORT)
+            .encode(CharBuffer.wrap(JSONObject().put("version", 1).put("acts", array).toString()))
+        val plain = ByteArray(encoded.remaining())
+        encoded.get(plain)
+        if (encoded.hasArray()) encoded.array().fill(0)
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.ENCRYPT_MODE, key(true))
         val encrypted = try { cipher.doFinal(plain) } finally { plain.fill(0) }

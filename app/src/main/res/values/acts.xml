@@ -14,6 +14,17 @@
     <string name="acts_delete_named" translatable="false">Delete %1$s</string>
     <string name="acts_delete" translatable="false">Delete Act</string>
     <string name="acts_delete_confirm" translatable="false">Permanently delete “%1$s” from this device? This cannot be undone.</string>
+    <string name="acts_share_named" translatable="false">Share %1$s</string>
+    <string name="acts_share" translatable="false">Share Act</string>
+    <string name="acts_share_warning" translatable="false">Review the exact plaintext below. Only this Act’s name and template will be shared, not its ID, pin or Agent configuration. Chosen apps may retain or forward it. Validation cannot detect every secret; remove private text before sharing. Confirmation opens Android’s share chooser with this plaintext.</string>
+    <string name="acts_share_confirm" translatable="false">Confirm and choose app</string>
+    <string name="acts_import" translatable="false">Import Act from local document</string>
+    <string name="acts_import_warning" translatable="false">Untrusted document: review the exact name and template below before adding. Its instructions may be misleading or unsafe. Import only stores data; it never runs instructions or sends to Hermes. Add creates a new, unpinned Act without replacing existing Acts.</string>
+    <string name="acts_import_reading" translatable="false">Reading local document… (15-second limit)</string>
+    <string name="acts_import_busy" translatable="false">Nothing added. A previous document provider is still busy. No new read was started. If it does not finish, force-stop and reopen Hermes Keys to retry with a trusted local provider.</string>
+    <string name="acts_import_timeout" translatable="false">Nothing added. Document reading timed out. Cancellation and closing were requested, but some providers cannot be interrupted. If import remains busy, force-stop and reopen Hermes Keys, then choose a trusted local provider.</string>
+    <string name="acts_import_confirm" translatable="false">Add as new Act</string>
+    <string name="acts_transfer_error" translatable="false">Nothing shared or added. The document may be invalid, over 16 KiB, an unsupported version, or contain forbidden fields, URLs or recognizable credentials. Duplicate names/templates and more than 32 Acts are refused. Storage or the chosen app may also be unavailable. Unlock and try again.</string>
     <string name="acts_save" translatable="false">Save Act</string>
     <string name="acts_empty" translatable="false">No Acts. Add one in Acts settings.</string>
     <string name="acts_validation_error" translatable="false">Not saved. Use a unique name, exactly one {input}, and stay within the limits. URLs and recognizable credential assignments are forbidden. If valid, unlock the device and check storage availability.</string>
