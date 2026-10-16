@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<resources>
+    <!-- Fork title bypasses upstream locale-specific ime_settings branding. -->
+    <string name="hermes_keys_settings" translatable="false">%1$s Settings</string>
+    <string name="agent">Agent</string>
+    <string name="agent_settings">Hermes agent settings</string>
+    <string name="agent_privacy">Optional: only the prompt preview you explicitly send leaves this keyboard. Ordinary typing stays offline. Use a dedicated, least-privilege Hermes profile with tools disabled, never your main terminal-capable agent. Your server and model provider may retain prompts. See README for setup.</string>
+    <string name="agent_base">HTTPS API base URL (server root or profile prefix; omit /v1)</string>
+    <string name="agent_token">Bearer token (paste; hidden)</string>
+    <string name="agent_token_hint">Token is never shown again. Paste a token to enable requests or change URL. To disable a saved opt-in, uncheck it and save without changing URL; no token needed. Stored encrypted with Android Keystore; excluded from backups.</string>
+    <string name="agent_opt_in">Allow explicit Agent requests to this server</string>
+    <string name="agent_save">Save configuration</string>
+    <string name="agent_forget">Disable and forget configuration</string>
+    <string name="agent_close">Close</string>
+    <string name="agent_saved">Saved. Use Agent in the expanded keyboard toolbar.</string>
+    <string name="agent_forgotten">Disabled; configuration deleted.</string>
+    <string name="agent_config_error">Not saved. Check the HTTPS URL and paste a valid token, or unlock the device and try again. Keystore storage must be available.</string>
+    <string name="agent_requires_23">Agent requires Android 6 or later for Keystore encryption. Ordinary keyboard features remain available.</string>
+    <string name="agent_setup_needed">No enabled configuration. Set an HTTPS server and bearer token, then opt in. Typing does not send requests.</string>
+    <string name="agent_blocked">Agent unavailable: private/password field, incognito, locked device, or editor disconnected/changed. Nothing inserted.</string>
+    <string name="agent_prompt_limit">Compose a prompt in the field, or select text, then tap Agent. Use 1–4000 characters. Longer text is not sent or truncated.</string>
+    <string name="agent_send_preview">Send only this text to %1$s?\n\n%2$s</string>
+    <string name="agent_send">Send prompt</string>
+    <string name="agent_waiting">Waiting (45 second limit). Cancel leaves your field unchanged; server work may continue.\n\n%1$s</string>
+    <string name="agent_timeout">Timed out after 45 seconds. Nothing inserted. Server work may continue; sending again starts another request.\n\nPrompt:\n%1$s</string>
+    <string name="agent_request_error">Request failed, timed out, or returned a non-success/invalid answer. Nothing inserted. Check server/token/network. Sending again starts a new request; server work may still be running.\n\nPrompt:\n%1$s</string>
+    <string name="agent_result">Review agent result</string>
+    <string name="agent_result_preview">Finish reason: %1$s. Insert after the selection/cursor? Original text will be kept. Review carefully: model output is untrusted.\n\n%2$s</string>
+    <string name="agent_insert">Insert after selection</string>
+    <string name="agent_insert_error">Full insertion could not be verified, or the editor changed. Some text may have been inserted. Check the field; Insert is disabled to prevent duplicates. You can select and copy this result:\n\n%1$s</string>
+</resources>
