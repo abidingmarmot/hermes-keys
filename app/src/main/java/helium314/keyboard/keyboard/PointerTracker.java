@@ -16,6 +16,7 @@ import android.view.MotionEvent;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
+import helium314.keyboard.accessibility.AccessibilityUtils;
 import helium314.keyboard.event.HapticEvent;
 import helium314.keyboard.keyboard.internal.BatchInputArbiter;
 import helium314.keyboard.keyboard.internal.BatchInputArbiter.BatchInputArbiterListener;
@@ -30,6 +31,7 @@ import helium314.keyboard.keyboard.internal.TimerProxy;
 import helium314.keyboard.keyboard.internal.TypingTimeRecorder;
 import helium314.keyboard.keyboard.internal.keyboard_parser.floris.KeyCode;
 import helium314.keyboard.latin.R;
+import helium314.keyboard.latin.agent.ActionPopupSession;
 import helium314.keyboard.latin.common.Constants;
 import helium314.keyboard.latin.common.CoordinateUtils;
 import helium314.keyboard.latin.common.InputPointers;
@@ -155,6 +157,27 @@ public final class PointerTracker implements PointerTrackerQueue.Element,
 
     // the popup keys panel currently being shown. equals null if no panel is active.
     private PopupKeysPanel mPopupKeysPanel;
+    private ActionPopupSession mActionPopupSession;
+    private boolean mActionPopupConsumed;
+
+    public ActionPopupSession getActionPopupSession() {
+        return mActionPopupSession;
+    }
+
+    public static boolean hasActionPopupInteraction() {
+        // A consumed hold remains active after slide-out, until its physical stream ends.
+        final Object oldest = sPointerTrackerQueue.getOldestElement();
+        for (PointerTracker tracker : sTrackers) {
+            if (tracker == oldest && tracker.mActionPopupConsumed) return true;
+        }
+        return false;
+    }
+
+    public static void cancelActionPopups() {
+        for (PointerTracker tracker : sTrackers) {
+            if (tracker.mActionPopupSession != null) tracker.dismissPopupKeysPanel();
+        }
+    }
 
     // true if this pointer is in the dragging finger mode.
     private boolean mIsInDraggingFinger = false;
@@ -651,6 +674,8 @@ public final class PointerTracker implements PointerTrackerQueue.Element,
         if (DEBUG_EVENT) {
             printTouchEvent("onDownEvent:", x, y, eventTime);
         }
+        // A new physical stream may follow an editor/window change without a delivered up.
+        if (mActionPopupConsumed) sPointerTrackerQueue.remove(this);
         // Naive up-to-down noise filter.
         final long deltaT = eventTime - mUpTime;
         if (deltaT < sParams.mTouchNoiseThresholdTime) {
@@ -699,6 +724,11 @@ public final class PointerTracker implements PointerTrackerQueue.Element,
     }
 
     private void dismissPopupKeysPanel() {
+        if (mActionPopupSession != null) {
+            mActionPopupSession.cancel();
+            mActionPopupSession = null;
+            mIsTrackingForActionDisabled = true;
+        }
         if (isShowingPopupKeysPanel()) {
             mPopupKeysPanel.dismissPopupKeysPanel();
             mPopupKeysPanel = null;
@@ -706,6 +736,8 @@ public final class PointerTracker implements PointerTrackerQueue.Element,
     }
 
     private void onDownEventInternal(final int x, final int y, final long eventTime) {
+        if (mActionPopupSession != null) dismissPopupKeysPanel();
+        mActionPopupConsumed = false;
         Key key = onDownKey(x, y, eventTime);
         // Key selection by dragging finger is allowed when 1) key selection by dragging finger is
         // enabled by configuration, 2) this pointer starts dragging from modifier key, or 3) this
@@ -809,7 +841,7 @@ public final class PointerTracker implements PointerTrackerQueue.Element,
         if (DEBUG_MOVE_EVENT) {
             printTouchEvent("onMoveEvent:", x, y, eventTime);
         }
-        if (mIsTrackingForActionDisabled) {
+        if (mIsTrackingForActionDisabled || (mActionPopupConsumed && !isShowingPopupKeysPanel())) {
             return;
         }
 
@@ -1052,6 +1084,17 @@ public final class PointerTracker implements PointerTrackerQueue.Element,
         sPointerTrackerQueue.remove(this);
     }
 
+    /** Accessibility lift/click only: validate ownership before using the normal cleanup/release. */
+    public void onAccessibilityActionPopupUp(final PopupKeysPanel panel, final int x, final int y,
+            final long eventTime) {
+        if (!AccessibilityUtils.Companion.getInstance().isTouchExplorationEnabled()
+                || panel != mPopupKeysPanel
+                || !mActionPopupConsumed || mActionPopupSession == null
+                || mIsTrackingForActionDisabled || getActivePointerTrackerCount() != 1
+                || sPointerTrackerQueue.getOldestElement() != this) return;
+        onUpEvent(x - panel.translateX(0), y - panel.translateY(0), eventTime);
+    }
+
     // Let this pointer tracker know that one of newer-than-this pointer trackers got an up event.
     // This pointer tracker needs to keep the key top graphics "pressed", but needs to get a
     // "virtual" up event.
@@ -1060,6 +1103,8 @@ public final class PointerTracker implements PointerTrackerQueue.Element,
         if (DEBUG_EVENT) {
             printTouchEvent("onPhntEvent:", mLastX, mLastY, eventTime);
         }
+        // A synthetic release must never choose an Action, even at a highlighted key.
+        if (mActionPopupConsumed) dismissPopupKeysPanel();
         onUpEventInternal(mLastX, mLastY, eventTime);
         cancelTrackingForAction();
     }
@@ -1076,6 +1121,26 @@ public final class PointerTracker implements PointerTrackerQueue.Element,
         mCurrentRepeatingKeyCode = Constants.NOT_A_CODE;
         // Release the last pressed key.
         setReleasedKeyGraphics(currentKey, true);
+
+        if (mActionPopupConsumed) {
+            final PopupKeysPanel panel = mPopupKeysPanel;
+            final boolean deliver = !mIsTrackingForActionDisabled && getActivePointerTrackerCount() == 1;
+            // Consume and detach BEFORE invoking the popup callback (which only posts preview).
+            mPopupKeysPanel = null;
+            final ActionPopupSession action = mActionPopupSession;
+            mActionPopupSession = null;
+            mIsTrackingForActionDisabled = true;
+            mKeySwipeAllowed = false;
+            sInKeySwipe = false;
+            if (panel != null) {
+                if (deliver && action != null) {
+                    panel.onUpEvent(panel.translateX(x), panel.translateY(y), mPointerId, eventTime);
+                } else if (action != null) action.cancel();
+                panel.dismissPopupKeysPanel();
+            }
+            if (action != null) action.cancelUnlessQueued();
+            return;
+        }
 
         if (mInHorizontalSwipe && currentKey.getCode() == KeyCode.DELETE) {
             sListener.onUpWithDeletePointerActive();
@@ -1141,6 +1206,7 @@ public final class PointerTracker implements PointerTrackerQueue.Element,
 
     @Override
     public void cancelTrackingForAction() {
+        if (mActionPopupConsumed) dismissPopupKeysPanel();
         if (isShowingPopupKeysPanel()) {
             return;
         }
@@ -1162,6 +1228,24 @@ public final class PointerTracker implements PointerTrackerQueue.Element,
         }
         final int code = key.getCode();
         sListener.onLongPressKey(code);
+        if (code == Constants.CODE_SPACE && Settings.getValues().mSpaceActionPopup) {
+            // Pre-hold swipes retain their existing path; only a stationary, single hold arms.
+            if (mInHorizontalSwipe || mInVerticalSwipe || mIsTrackingForActionDisabled) return;
+            mActionPopupConsumed = true;
+            mCurrentKey = null;
+            setReleasedKeyGraphics(key, true);
+            mKeySwipeAllowed = false;
+            sInKeySwipe = false;
+            mIsDetectingGesture = false;
+            if (getActivePointerTrackerCount() != 1) { mIsTrackingForActionDisabled = true; return; }
+            mActionPopupSession = sListener.prepareActionPopup();
+            if (mActionPopupSession == null) { mIsTrackingForActionDisabled = true; return; }
+            final PopupKeysPanel panel = sDrawingProxy.showPopupKeysKeyboard(key, this);
+            if (panel == null) { dismissPopupKeysPanel(); return; }
+            panel.onDownEvent(panel.translateX(mLastX), panel.translateY(mLastY), mPointerId, SystemClock.uptimeMillis());
+            mPopupKeysPanel = panel;
+            return;
+        }
         if (key.hasNoPanelAutoPopupKey()) {
             cancelKeyTracking();
             final int popupKeyCode = key.getPopupKeys()[0].mCode;

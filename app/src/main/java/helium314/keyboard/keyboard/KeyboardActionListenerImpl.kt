@@ -56,6 +56,8 @@ class KeyboardActionListenerImpl(private val latinIME: LatinIME, private val inp
         latinIME.hapticAndAudioFeedback(primaryCode, repeatCount, hapticEvent)
     }
 
+    override fun prepareActionPopup() = latinIME.prepareActionPopup()
+
     override fun onLongPressKey(primaryCode: Int) {
         metaOnLongPressKey(primaryCode)
         performHapticFeedback(HapticEvent.KEY_LONG_PRESS)

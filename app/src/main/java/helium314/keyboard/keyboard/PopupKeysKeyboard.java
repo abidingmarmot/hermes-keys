@@ -244,6 +244,25 @@ public final class PopupKeysKeyboard extends Keyboard {
 
     public static class Builder extends KeyboardBuilder<PopupKeysKeyboardParams> {
         private final Key mParentKey;
+        private java.util.List<String> mActionLabels;
+
+        /** Bounded rectangular Action popup; no user labels go through the key-spec parser. */
+        public Builder(final Context context, final Key key, final Keyboard keyboard,
+                final java.util.List<String> labels) {
+            super(context, new PopupKeysKeyboardParams());
+            mParentKey = key;
+            mActionLabels = labels;
+            mParams.mId = keyboard.mId;
+            readAttributes(keyboard.mPopupKeysTemplate);
+            mParams.mVerticalGap = keyboard.mVerticalGap / 2;
+            final int width = keyboard.mId.getWidth();
+            final int columns = Math.min(2, labels.size());
+            final int keyWidth = Math.max(1, (width - Math.min(32, width / 4)) / columns);
+            mParams.mAbsolutePopupKeyWidth = keyWidth;
+            mParams.setParameters(labels.size(), columns, keyWidth,
+                    keyboard.mMostCommonKeyHeight, key.getX() + key.getWidth() / 2,
+                    width, true, true, 0);
+        }
 
         private static final float LABEL_PADDING_RATIO = 0.2f;
         private static final float DIVIDER_RATIO = 0.2f;
@@ -327,6 +346,17 @@ public final class PopupKeysKeyboard extends Keyboard {
         @NonNull
         public PopupKeysKeyboard build() {
             final PopupKeysKeyboardParams params = mParams;
+            if (mActionLabels != null) {
+                for (int n = 0; n < mActionLabels.size(); n++) {
+                    final int row = n / params.mNumColumns;
+                    params.onAddKey(new Key(mActionLabels.get(n), null, n, null, null,
+                            Key.LABEL_FLAGS_FONT_NORMAL | Key.LABEL_FLAGS_AUTO_SCALE,
+                            Key.BACKGROUND_TYPE_ACTION, params.getX(n, row), params.getY(row),
+                            params.mDefaultAbsoluteKeyWidth, params.mDefaultAbsoluteRowHeight,
+                            params.mHorizontalGap, params.mVerticalGap));
+                }
+                return new PopupKeysKeyboard(params);
+            }
             final int popupKeyFlags = mParentKey.getPopupKeyLabelFlags();
             final PopupKeySpec[] popupKeys = mParentKey.getPopupKeys();
             final int background = mParentKey.hasActionKeyPopups() ? Key.BACKGROUND_TYPE_ACTION : Key.BACKGROUND_TYPE_NORMAL;

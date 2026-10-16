@@ -49,6 +49,7 @@ import helium314.keyboard.latin.RichInputMethodSubtype;
 import helium314.keyboard.latin.SuggestedWords;
 import helium314.keyboard.latin.common.ColorType;
 import helium314.keyboard.latin.common.Colors;
+import helium314.keyboard.latin.agent.ActionPopupSession;
 import helium314.keyboard.latin.common.Constants;
 import helium314.keyboard.latin.common.CoordinateUtils;
 import helium314.keyboard.latin.define.DebugFlags;
@@ -114,6 +115,7 @@ public final class MainKeyboardView extends KeyboardView implements DrawingProxy
     // More keys panel (used by both popup keys keyboard and more suggestions view)
     // TODO: Consider extending to support multiple popup keys panels
     private PopupKeysPanel mPopupKeysPanel;
+    private boolean mConsumeActionPopupStream;
 
     // Gesture floating preview text
     private final int mGestureFloatingPreviewTextLingerTimeout;
@@ -481,11 +483,13 @@ public final class MainKeyboardView extends KeyboardView implements DrawingProxy
     @Nullable
     public PopupKeysPanel showPopupKeysKeyboard(@NonNull final Key key,
                                                 @NonNull final PointerTracker tracker) {
+        final ActionPopupSession action = tracker.getActionPopupSession();
         final PopupKeySpec[] popupKeys = key.getPopupKeys();
-        if (popupKeys == null) {
+        if (action == null && popupKeys == null) {
             return null;
         }
-        Keyboard popupKeysKeyboard = mPopupKeysKeyboardCache.get(key);
+        Keyboard popupKeysKeyboard = action == null ? mPopupKeysKeyboardCache.get(key)
+                : new PopupKeysKeyboard.Builder(getContext(), key, getKeyboard(), action.getLabels()).build();
         if (popupKeysKeyboard == null) {
             // {@link KeyPreviewDrawParams#mPreviewVisibleWidth} should have been set at
             // {@link KeyPreviewChoreographer#placeKeyPreview(Key,TextView,KeyboardIconsSet,KeyDrawParams,int,int[]},
@@ -525,7 +529,17 @@ public final class MainKeyboardView extends KeyboardView implements DrawingProxy
         // {@code mPreviewVisibleOffset} has been set appropriately in
         // {@link KeyboardView#showKeyPreview(PointerTracker)}.
         final int pointY = key.getY() + mKeyPreviewDrawParams.getVisibleOffset();
-        popupKeysKeyboardView.showPopupKeysPanel(this, this, pointX, pointY, mKeyboardActionListener);
+        if (action != null) {
+            popupKeysKeyboardView.showPopupKeysPanel(this, this, pointX, pointY, selected -> {
+                // Only the owning tracker's consumed, detached release may select.
+                if (!tracker.isInOperation() && tracker.getActionPopupSession() == null)
+                    action.release(selected.getCode());
+                return kotlin.Unit.INSTANCE;
+            });
+            popupKeysKeyboardView.setActionPopupMode(tracker);
+        } else {
+            popupKeysKeyboardView.showPopupKeysPanel(this, this, pointX, pointY, mKeyboardActionListener);
+        }
         return popupKeysKeyboardView;
     }
 
@@ -584,6 +598,7 @@ public final class MainKeyboardView extends KeyboardView implements DrawingProxy
         if (getKeyboard() == null) {
             return false;
         }
+        if (consumeActionPopupStream(event)) return true;
         if (mNonDistinctMultitouchHelper != null) {
             if (event.getPointerCount() > 1 && mTimerHandler.isInKeyRepeat()) {
                 // Key repeating timer will be canceled if 2 or popup keys are in action.
@@ -596,7 +611,27 @@ public final class MainKeyboardView extends KeyboardView implements DrawingProxy
         return processMotionEvent(event);
     }
 
+    /** Quarantine the rest of a cancelled hold, including non-distinct helper synthetic downs. */
+    private boolean consumeActionPopupStream(final MotionEvent event) {
+        if (event.getActionMasked() == MotionEvent.ACTION_DOWN) mConsumeActionPopupStream = false;
+        if (mConsumeActionPopupStream) return true;
+        if ((event.getPointerCount() > 1 || event.getActionMasked() == MotionEvent.ACTION_CANCEL)
+                && PointerTracker.hasActionPopupInteraction()) {
+            mConsumeActionPopupStream = true;
+            PointerTracker.cancelActionPopups();
+            final MotionEvent cancel = MotionEvent.obtain(event);
+            cancel.setAction(MotionEvent.ACTION_CANCEL);
+            // Cancel BEFORE any helper can turn a multitouch transition into a synthetic release.
+            PointerTracker.getPointerTracker(event.getPointerId(event.getActionIndex()))
+                    .processMotionEvent(cancel, mKeyDetector);
+            cancel.recycle();
+            return true;
+        }
+        return false;
+    }
+
     public boolean processMotionEvent(final MotionEvent event) {
+        if (consumeActionPopupStream(event)) return true;
         final int index = event.getActionIndex();
         final int id = event.getPointerId(index);
         final PointerTracker tracker = PointerTracker.getPointerTracker(id);
@@ -625,6 +660,7 @@ public final class MainKeyboardView extends KeyboardView implements DrawingProxy
     }
 
     public void onHideWindow() {
+        PointerTracker.cancelActionPopups();
         onDismissPopupKeysPanel();
         final MainKeyboardAccessibilityDelegate accessibilityDelegate = mAccessibilityDelegate;
         if (accessibilityDelegate != null

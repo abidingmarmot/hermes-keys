@@ -5,6 +5,8 @@
     <!-- Fork title bypasses upstream locale-specific ime_settings branding. -->
     <string name="hermes_keys_settings" translatable="false">%1$s Settings</string>
     <string name="agent" translatable="false">Agent</string>
+    <string name="space_action_popup" translatable="false">Hold Space for Action popup</string>
+    <string name="space_action_popup_summary" translatable="false">Off by default. Replaces the Space long-press keyboard picker with Agent and up to 3 pinned local Acts. Hold, slide into a choice, release to preview only. Requires enabled Agent configuration; unavailable in private fields. Tap Space and pre-hold swipes are unchanged.</string>
     <string name="agent_settings" translatable="false">Hermes agent settings</string>
     <string name="agent_privacy" translatable="false">Optional: only the prompt preview you explicitly send leaves this keyboard. Ordinary typing stays offline. Use a dedicated, least-privilege Hermes profile with tools disabled, never your main terminal-capable agent. Your server and model provider may retain prompts. See README for setup.</string>
     <string name="agent_base" translatable="false">HTTPS API base URL (server root or profile prefix; omit /v1)</string>

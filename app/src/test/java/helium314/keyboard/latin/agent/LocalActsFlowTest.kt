@@ -55,6 +55,9 @@ class LocalActsFlowTest {
         var text = "chosen private suffix"
         var start = 0
         var end = 6
+        var acts = LocalActs.presets().map { it.withPin(true) }
+        var configured = true
+        var storageFails = false
         val controller = AgentController(ime)
         init {
             val imeDialog = mock(Dialog::class.java)
@@ -81,6 +84,129 @@ class LocalActsFlowTest {
             picker.listView.performItemClick(null, 0, 0)
             shadowOf(Looper.getMainLooper()).idle()
         }
+    }
+
+    private fun actionFlow(block: (Harness) -> Unit) {
+        val h = Harness()
+        val settings = mock(SettingsValues::class.java)
+        SettingsValues::class.java.getField("mSpaceActionPopup").apply { isAccessible = true }.setBoolean(settings, true)
+        mockStatic(Settings::class.java).use { static ->
+            static.`when`<SettingsValues> { Settings.getValues() }.thenReturn(settings)
+            mockConstruction(LocalActStore::class.java) { store, _ ->
+                `when`(store.load()).thenAnswer { check(!h.storageFails); h.acts }
+            }.use {
+                mockConstruction(AgentCredentials::class.java) { credentials, _ ->
+                    `when`(credentials.load()).thenAnswer {
+                        if (h.configured) AgentCredentials.Config("https://example.invalid", "unit-test-placeholder", true) else null
+                    }
+                }.use {
+                    mockConstruction(AgentClient::class.java).use { clients ->
+                        try {
+                            block(h)
+                            assertTrue(clients.constructed().isEmpty(), "Preview must never construct a network client")
+                            verify(h.ime, never()).insertAgentResult(anyString(), any())
+                            verify(h.connection, never()).commitText(any(), anyInt())
+                        } finally { h.controller.invalidate(); h.activity.finish() }
+                    }
+                }
+            }
+        }
+    }
+
+    @Test fun actionPopupExactGenericAndThreePinnedPreviewsAreDeferredAndNeverSend() = actionFlow { h ->
+        for (index in 0..3) {
+            val session = requireNotNull(h.controller.prepareActionPopup())
+            assertEquals(4, session.labels.size)
+            assertTrue(session.labels.all { it.length <= 16 })
+            session.release(index); session.release((index + 1) % 4)
+            assertNull(dialog(h.controller))
+            shadowOf(Looper.getMainLooper()).idle()
+            val preview = requireNotNull(dialog(h.controller))
+            val prompt = if (index == 0) "chosen" else LocalActs.expand(h.acts[index - 1], "chosen")
+            assertTrue(texts(preview.window!!.decorView).contains(h.activity.getString(R.string.agent_send_preview,
+                "https://example.invalid/v1/chat/completions", prompt)))
+            h.controller.invalidate()
+        }
+    }
+
+    @Test fun actionPopupRejectsStaleEditorSnapshotPinAndGeneration() {
+        val mutations: List<(Harness) -> Unit> = listOf(
+            { it.text = "changed private suffix" },
+            { it.start = 1 },
+            { `when`(it.ime.currentInputEditorInfo).thenReturn(EditorInfo().apply { inputType = InputType.TYPE_CLASS_TEXT }) },
+            { `when`(it.ime.currentInputConnection).thenReturn(mock(InputConnection::class.java)) },
+            { it.controller.invalidate() },
+            { it.controller.selectionChanged(1, 6) },
+            { h -> h.acts = h.acts.drop(1) },
+            { h -> h.acts = h.acts.map { it.withPin(false) } },
+            { h -> h.acts = h.acts.reversed() },
+            { h -> h.acts = h.acts.map { LocalAct(it.id, it.name + " edited", it.template, it.pinned) } },
+            { h -> h.acts = h.acts.map { LocalAct(it.id, it.name, "New instruction: {input}", it.pinned) } },
+            { it.storageFails = true },
+            { it.configured = false },
+            { `when`(it.ime.isInputViewShown).thenReturn(false) }
+        )
+        for (mutate in mutations) actionFlow { h ->
+            val session = requireNotNull(h.controller.prepareActionPopup())
+            session.release(1) // Mutation between release and posted preview is also rejected.
+            mutate(h)
+            shadowOf(Looper.getMainLooper()).idle()
+            assertNull(dialog(h.controller))
+        }
+    }
+
+    @Test fun actionPopupPrivacyAndMissingConfigurationFailBeforeReadingText() {
+        val mutations: List<(Harness) -> Unit> = listOf(
+            { it.configured = false }, { it.storageFails = true },
+            { it.editor.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD },
+            { it.editor.imeOptions = EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING },
+            { SettingsValues::class.java.getField("mIncognitoModeEnabled").apply { isAccessible = true }.setBoolean(Settings.getValues(), true) },
+            { shadowOf(it.activity.getSystemService(KeyguardManager::class.java)).setKeyguardLocked(true) },
+            { `when`(it.ime.currentInputEditorInfo).thenReturn(null) },
+            { `when`(it.ime.currentInputConnection).thenReturn(null) },
+            { `when`(it.ime.isInputViewShown).thenReturn(false) },
+            { SettingsValues::class.java.getField("mSpaceActionPopup").apply { isAccessible = true }.setBoolean(Settings.getValues(), false) }
+        )
+        for (mutate in mutations) actionFlow { h ->
+            mutate(h)
+            assertNull(h.controller.prepareActionPopup())
+            verify(h.connection, never()).getExtractedText(any(), anyInt())
+            shadowOf(h.activity.getSystemService(KeyguardManager::class.java)).setKeyguardLocked(false)
+        }
+    }
+
+    @Test fun actionPopupPolicyRecheckedOnReleaseBeforeReadingText() {
+        for (mutation in 0..4) actionFlow { h ->
+            val session = requireNotNull(h.controller.prepareActionPopup())
+            clearInvocations(h.connection)
+            when (mutation) {
+                0 -> h.editor.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+                1 -> h.editor.imeOptions = EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING
+                2 -> SettingsValues::class.java.getField("mIncognitoModeEnabled").apply { isAccessible = true }.setBoolean(Settings.getValues(), true)
+                3 -> shadowOf(h.activity.getSystemService(KeyguardManager::class.java)).setKeyguardLocked(true)
+                4 -> SettingsValues::class.java.getField("mSpaceActionPopup").apply { isAccessible = true }.setBoolean(Settings.getValues(), false)
+            }
+            session.release(0)
+            shadowOf(Looper.getMainLooper()).idle()
+            assertNull(dialog(h.controller))
+            verify(h.connection, never()).getExtractedText(any(), anyInt())
+            shadowOf(h.activity.getSystemService(KeyguardManager::class.java)).setKeyguardLocked(false)
+        }
+    }
+
+    @Test fun actionPopupLabelsRefreshAndQueuedCancellationDoesNotPreview() = actionFlow { h ->
+        val first = requireNotNull(h.controller.prepareActionPopup())
+        first.release(1); first.cancel()
+        shadowOf(Looper.getMainLooper()).idle()
+        assertNull(dialog(h.controller))
+        h.acts = listOf(LocalAct(h.acts[0].id, "Very long renamed Act", "{input}", true))
+        val second = requireNotNull(h.controller.prepareActionPopup())
+        assertEquals(listOf("Agent", "1 Very long …"), second.labels)
+        second.release(-1)
+        shadowOf(Looper.getMainLooper()).idle()
+        assertNull(dialog(h.controller))
+        h.acts = emptyList()
+        assertEquals(listOf("Agent"), requireNotNull(h.controller.prepareActionPopup()).labels)
     }
 
     @Test fun exactPreviewThenExplicitSendReviewAndExplicitInsert() {

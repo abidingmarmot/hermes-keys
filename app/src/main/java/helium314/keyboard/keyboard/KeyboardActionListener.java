@@ -13,6 +13,7 @@ import androidx.core.view.inputmethod.InputContentInfoCompat;
 
 import helium314.keyboard.event.HapticEvent;
 import helium314.keyboard.keyboard.internal.LayoutDirective;
+import helium314.keyboard.latin.agent.ActionPopupSession;
 import helium314.keyboard.latin.common.Constants;
 import helium314.keyboard.latin.common.InputPointers;
 import helium314.keyboard.latin.utils.RecapitalizeMode;
@@ -31,6 +32,8 @@ public interface KeyboardActionListener {
     void onPressKey(int primaryCode, int repeatCount, int pointerCount, HapticEvent hapticEvent);
 
     void onLongPressKey(int primaryCode);
+
+    @Nullable default ActionPopupSession prepareActionPopup() { return null; }
 
     /**
      * Called when the user releases a key. This is sent after the {@link #onCodeInput} is called.

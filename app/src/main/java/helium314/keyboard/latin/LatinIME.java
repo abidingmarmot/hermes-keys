@@ -58,6 +58,7 @@ import helium314.keyboard.keyboard.KeyboardLayoutSet;
 import helium314.keyboard.keyboard.KeyboardSwitcher;
 import helium314.keyboard.keyboard.MainKeyboardView;
 import helium314.keyboard.latin.SuggestedWords.SuggestedWordInfo;
+import helium314.keyboard.latin.agent.ActionPopupSession;
 import helium314.keyboard.latin.agent.AgentController;
 import helium314.keyboard.latin.agent.AgentEditor;
 import helium314.keyboard.latin.common.ColorType;
@@ -1442,6 +1443,10 @@ public class LatinIME extends InputMethodService implements
             return;
         }
         mKeyboardActionListener.onCodeInput(codePoint, x, y, isKeyRepeat);
+    }
+
+    public ActionPopupSession prepareActionPopup() {
+        return mAgentController.prepareActionPopup();
     }
 
     /** Only called after the agent result preview is explicitly confirmed. Never replaces selection. */

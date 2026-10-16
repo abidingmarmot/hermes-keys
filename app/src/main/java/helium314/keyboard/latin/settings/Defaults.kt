@@ -156,6 +156,7 @@ object Defaults {
     const val PREF_SHOW_POPUP_HINTS = false
     const val PREF_SHOW_TLD_POPUP_KEYS = true
     const val PREF_MORE_POPUP_KEYS = "main"
+    const val PREF_SPACE_ACTION_POPUP = false
     const val PREF_SPACE_TO_CHANGE_LANG = true
     const val PREF_LANGUAGE_SWIPE_DISTANCE = 5
     const val PREF_TOUCHPAD_SENSITIVITY = 50

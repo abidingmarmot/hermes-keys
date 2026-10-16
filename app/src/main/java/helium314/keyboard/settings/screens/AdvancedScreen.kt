@@ -72,6 +72,7 @@ fun AdvancedSettingsScreen(
             Settings.PREF_TOUCHPAD_EDGE_SCROLL else null,
         Settings.PREF_DELETE_SWIPE,
         Settings.PREF_SPACE_TO_CHANGE_LANG,
+        Settings.PREF_SPACE_ACTION_POPUP,
         Settings.PREFS_LONG_PRESS_SYMBOLS_FOR_NUMPAD,
         Settings.PREF_ENABLE_EMOJI_ALT_PHYSICAL_KEY,
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) Settings.PREF_SHOW_SETUP_WIZARD_ICON else null,
@@ -159,6 +160,10 @@ fun createAdvancedSettings(context: Context) = listOf(
     },
     Setting(context, Settings.PREF_DELETE_SWIPE, R.string.delete_swipe, R.string.delete_swipe_summary) {
         SwitchPreference(it, Defaults.PREF_DELETE_SWIPE)
+    },
+    Setting(context, Settings.PREF_SPACE_ACTION_POPUP,
+        R.string.space_action_popup, R.string.space_action_popup_summary) {
+        SwitchPreference(it, Defaults.PREF_SPACE_ACTION_POPUP)
     },
     Setting(context, Settings.PREF_SPACE_TO_CHANGE_LANG,
         R.string.prefs_long_press_keyboard_to_change_lang,

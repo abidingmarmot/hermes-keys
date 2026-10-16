@@ -45,6 +45,31 @@ public class PopupKeysKeyboardView extends KeyboardView implements PopupKeysPane
     private int mOriginX;
     private int mOriginY;
     private Key mCurrentKey;
+    private boolean mActionPopup;
+    private boolean mActionMoved;
+
+    private PointerTracker mActionPopupTracker;
+
+    public void setActionPopupMode(final PointerTracker tracker) {
+        mActionPopup = true;
+        mActionMoved = false;
+        mActionPopupTracker = tracker;
+        // Action choices use visible bounds, without the ordinary popup's themed offset.
+        mKeyDetector.setKeyboard(getKeyboard(), -getPaddingLeft(), -getPaddingTop());
+    }
+
+    public boolean isActionPopup() { return mActionPopup; }
+
+    /** Only the accessibility delegate's deliberate lift/click may use this release path. */
+    public void onAccessibilityUpEvent(final int x, final int y, final int pointerId,
+            final long eventTime) {
+        if (!mActionPopup || mActionPopupTracker == null || pointerId != mActivePointerId
+                || !isShowingInParent()
+                || !AccessibilityUtils.Companion.getInstance().isTouchExplorationEnabled()) return;
+        // Lift-to-type and explicit accessibility clicks need no slide, unlike physical holds.
+        mActionMoved = true;
+        mActionPopupTracker.onAccessibilityActionPopupUp(this, x, y, eventTime);
+    }
 
     private int mActivePointerId;
 
@@ -125,6 +150,7 @@ public class PopupKeysKeyboardView extends KeyboardView implements PopupKeysPane
             int pointX, int pointY, KeyboardActionListener listener) {
         mListener = listener;
         mOnReleaseKey = null;
+        mActionPopup = false;
         showPopupKeysPanelInternal(parentView, controller, pointX, pointY);
     }
 
@@ -136,6 +162,7 @@ public class PopupKeysKeyboardView extends KeyboardView implements PopupKeysPane
             int pointX, int pointY, Function1<Key, Unit> onReleaseKey) {
         mListener = null;
         mOnReleaseKey = onReleaseKey;
+        mActionPopup = false;
         showPopupKeysPanelInternal(parentView, controller, pointX, pointY);
     }
 
@@ -196,7 +223,7 @@ public class PopupKeysKeyboardView extends KeyboardView implements PopupKeysPane
     @Override
     public void onDownEvent(final int x, final int y, final int pointerId, final long eventTime) {
         mActivePointerId = pointerId;
-        mCurrentKey = detectKey(x, y);
+        mCurrentKey = mActionPopup ? null : detectKey(x, y);
     }
 
     @Override
@@ -204,6 +231,7 @@ public class PopupKeysKeyboardView extends KeyboardView implements PopupKeysPane
         if (mActivePointerId != pointerId) {
             return;
         }
+        mActionMoved = true;
         final boolean hasOldKey = (mCurrentKey != null);
         mCurrentKey = detectKey(x, y);
         if (hasOldKey && mCurrentKey == null) {
@@ -219,7 +247,7 @@ public class PopupKeysKeyboardView extends KeyboardView implements PopupKeysPane
         }
         // Calling {@link #detectKey(int,int,int)} here is harmless because the last move event and
         // the following up event share the same coordinates.
-        mCurrentKey = detectKey(x, y);
+        mCurrentKey = mActionPopup && !mActionMoved ? null : detectKey(x, y);
         if (mCurrentKey != null) {
             updateReleaseKeyGraphics(mCurrentKey);
             onKeyInput(mCurrentKey, x, y);
@@ -250,7 +278,18 @@ public class PopupKeysKeyboardView extends KeyboardView implements PopupKeysPane
 
     private Key detectKey(int x, int y) {
         final Key oldKey = mCurrentKey;
-        final Key newKey = mKeyDetector.detectHitKey(x, y);
+        Key newKey = null;
+        if (mActionPopup) {
+            // Exact visible hits, including shared row edges where nearest-key ties can disagree.
+            for (final Key key : getKeyboard().getSortedKeys()) {
+                if (key.isOnKey(mKeyDetector.getTouchX(x), mKeyDetector.getTouchY(y))) {
+                    newKey = key;
+                    break;
+                }
+            }
+        } else {
+            newKey = mKeyDetector.detectHitKey(x, y);
+        }
         if (newKey == oldKey) {
             return newKey;
         }
@@ -278,6 +317,12 @@ public class PopupKeysKeyboardView extends KeyboardView implements PopupKeysPane
 
     @Override
     public void dismissPopupKeysPanel() {
+        if (mActionPopup) {
+            mActionPopupTracker = null;
+            mOnReleaseKey = null;
+            if (mCurrentKey != null) updateReleaseKeyGraphics(mCurrentKey);
+            mCurrentKey = null;
+        }
         if (!isShowingInParent()) {
             return;
         }
@@ -308,6 +353,10 @@ public class PopupKeysKeyboardView extends KeyboardView implements PopupKeysPane
         final int x = (int)me.getX(index);
         final int y = (int)me.getY(index);
         final int pointerId = me.getPointerId(index);
+        if (mActionPopup && (action == MotionEvent.ACTION_CANCEL || me.getPointerCount() > 1)) {
+            mController.onCancelPopupKeysPanel();
+            return true;
+        }
         switch (action) {
         case MotionEvent.ACTION_DOWN:
         case MotionEvent.ACTION_POINTER_DOWN:

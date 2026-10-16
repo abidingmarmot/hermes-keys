@@ -7,6 +7,8 @@
 package helium314.keyboard.accessibility
 
 import android.graphics.Rect
+import android.os.SystemClock
+import helium314.keyboard.keyboard.Key
 import helium314.keyboard.latin.utils.Log
 import android.view.MotionEvent
 import helium314.keyboard.keyboard.KeyDetector
@@ -24,6 +26,7 @@ class PopupKeysKeyboardAccessibilityDelegate(
     private val mPopupKeysKeyboardValidBounds = Rect()
     private var mOpenAnnounceResId = 0
     private var mCloseAnnounceResId = 0
+    private var hoverPointerId = -1
     fun setOpenAnnounce(resId: Int) {
         mOpenAnnounceResId = resId
     }
@@ -33,11 +36,26 @@ class PopupKeysKeyboardAccessibilityDelegate(
     }
 
     fun onShowPopupKeysKeyboard() {
+        hoverPointerId = -1
         sendWindowStateChanged(mOpenAnnounceResId)
     }
 
     fun onDismissPopupKeysKeyboard() {
+        hoverPointerId = -1
         sendWindowStateChanged(mCloseAnnounceResId)
+    }
+
+    override fun performClickOn(key: Key) {
+        if (!mKeyboardView.isActionPopup) {
+            super.performClickOn(key)
+            return
+        }
+        if (keyboard?.sortedKeys?.contains(key) != true || !key.isEnabled) return
+        // An explicit screen-reader click is selection, not a synthetic physical hold.
+        mKeyboardView.onAccessibilityUpEvent(
+            key.hitBox.centerX() + mKeyboardView.paddingLeft,
+            key.hitBox.centerY() + mKeyboardView.paddingTop,
+            HOVER_EVENT_POINTER_ID, SystemClock.uptimeMillis())
     }
 
     override fun onHoverEnter(event: MotionEvent) {
@@ -50,6 +68,7 @@ class PopupKeysKeyboardAccessibilityDelegate(
         val y = event.getY(actionIndex).toInt()
         val pointerId = event.getPointerId(actionIndex)
         val eventTime = event.eventTime
+        hoverPointerId = pointerId
         mKeyboardView.onDownEvent(x, y, pointerId, eventTime)
     }
 
@@ -81,10 +100,17 @@ class PopupKeysKeyboardAccessibilityDelegate(
         // are treated as closing.
         mPopupKeysKeyboardValidBounds[0, 0, mKeyboardView.width] = mKeyboardView.height
         mPopupKeysKeyboardValidBounds.inset(CLOSING_INSET_IN_PIXEL, CLOSING_INSET_IN_PIXEL)
+        val matchingHover = hoverPointerId == pointerId
+        hoverPointerId = -1
         if (mPopupKeysKeyboardValidBounds.contains(x, y)) {
             // Invoke {@link PopupKeysKeyboardView#onUpEvent(int,int,int,long)} as if this hover
             // exit event selects a key.
-            mKeyboardView.onUpEvent(x, y, pointerId, eventTime)
+            if (mKeyboardView.isActionPopup) {
+                if (matchingHover && lastKey != null)
+                    mKeyboardView.onAccessibilityUpEvent(x, y, pointerId, eventTime)
+            } else {
+                mKeyboardView.onUpEvent(x, y, pointerId, eventTime)
+            }
             // TODO: Should fix this reference. This is a hack to clear the state of
             // {@link PointerTracker}.
             PointerTracker.dismissAllPopupKeysPanels()

@@ -12,6 +12,7 @@ import android.view.WindowManager
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import helium314.keyboard.keyboard.PointerTracker
 import helium314.keyboard.latin.LatinIME
 import helium314.keyboard.latin.R
 import helium314.keyboard.latin.settings.Settings
@@ -26,8 +27,14 @@ class AgentController(private val ime: LatinIME) {
     private var selectionStart = -1
     private var selectionEnd = -1
     private var hasResult = false
+    private var actionPopup: ActionPopupSession? = null
 
     fun invalidate() {
+        actionPopup?.let {
+            it.cancel()
+            PointerTracker.cancelActionPopups()
+        }
+        actionPopup = null
         generation++
         client?.cancel()
         client = null
@@ -40,6 +47,7 @@ class AgentController(private val ime: LatinIME) {
     }
 
     fun selectionChanged(start: Int, end: Int) {
+        if (actionPopup != null && (start != selectionStart || end != selectionEnd)) invalidate()
         if (dialog != null && (start != selectionStart || end != selectionEnd)) {
             if (hasResult) dialog?.getButton(AlertDialog.BUTTON_POSITIVE)?.isEnabled = false
             else invalidate()
@@ -49,6 +57,41 @@ class AgentController(private val ime: LatinIME) {
     private fun allowed() = AgentProtocol.allowed(ime.currentInputEditorInfo,
         Settings.getValues().mIncognitoModeEnabled, ime.currentInputConnection != null)
         && !(ime.getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager).isKeyguardLocked
+
+    /** Fail closed before capture, including missing configuration or unreadable local storage. */
+    fun prepareActionPopup(): ActionPopupSession? {
+        invalidate()
+        if (Build.VERSION.SDK_INT < 23 || !Settings.getValues().mSpaceActionPopup ||
+            !allowed() || !ime.isInputViewShown) return null
+        if (runCatching { AgentCredentials(ime).load() }.getOrNull()?.enabled != true) return null
+        val pins = runCatching { LocalActStore(ime).load().filter { it.pinned }.take(3) }.getOrNull() ?: return null
+        val connection = ime.currentInputConnection ?: return null
+        val editor = ime.currentInputEditorInfo
+        val snapshot = AgentEditor.capture(connection) ?: return null
+        if (runCatching { snapshot.prompt() }.isFailure) return null
+        selectionStart = snapshot.start
+        selectionEnd = snapshot.end
+        val session = generation
+        fun fingerprint(acts: List<LocalAct>) = acts.map { listOf(it.id, it.name, it.template, it.pinned) }
+        val expectedPins = fingerprint(pins)
+        return ActionPopupSession(listOf(ime.getString(R.string.agent)) +
+            pins.mapIndexed { index, act -> "${index + 1} ${ActionPopupSession.label(act.name)}" },
+            { handler.post(it) }) { index ->
+            // Identity/generation/policy checks precede any fresh editor read.
+            if (session != generation) return@ActionPopupSession
+            if (!Settings.getValues().mSpaceActionPopup || !allowed() || !ime.isInputViewShown ||
+                ime.currentInputConnection !== connection || ime.currentInputEditorInfo !== editor) {
+                invalidate(); return@ActionPopupSession
+            }
+            if (runCatching { AgentCredentials(ime).load() }.getOrNull()?.enabled != true) {
+                invalidate(); return@ActionPopupSession
+            }
+            val currentPins = runCatching { LocalActStore(ime).load().filter { it.pinned }.take(3) }.getOrNull()
+            if (currentPins == null || fingerprint(currentPins) != expectedPins ||
+                AgentEditor.capture(connection) != snapshot) { invalidate(); return@ActionPopupSession }
+            show(if (index == 0) null else pins[index - 1], snapshot)
+        }.also { actionPopup = it }
+    }
 
     fun showActs() {
         invalidate()
