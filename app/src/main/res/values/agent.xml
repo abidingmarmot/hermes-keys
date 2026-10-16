@@ -16,6 +16,30 @@
     <string name="agent_save" translatable="false">Save configuration</string>
     <string name="agent_forget" translatable="false">Disable and forget configuration</string>
     <string name="agent_close" translatable="false">Close</string>
+    <string name="agent_test_connection" translatable="false">Test saved connection</string>
+    <string name="agent_test_saved_notice" translatable="false">Tests SAVED configuration only. Unsaved URL, token and opt-in changes are not applied. Opening settings or saving never sends a test.</string>
+    <string name="agent_test_ready" translatable="false">Saved opt-in is enabled. A test requires confirmation.</string>
+    <string name="agent_test_no_config" translatable="false">Test unavailable: no saved configuration. Save an HTTPS URL, bearer token and explicit opt-in first.</string>
+    <string name="agent_test_opt_in_needed" translatable="false">Test unavailable: saved opt-in is off. Paste a token, opt in and save first.</string>
+    <string name="agent_test_storage_error" translatable="false">Test unavailable: saved configuration cannot be read. Unlock the device and check Keystore availability.</string>
+    <string name="agent_test_confirm" translatable="false">Send one test using SAVED configuration? Unsaved form changes are not applied. The saved bearer token is used only for authentication.\n\nExact fixed prompt:\n%1$s\n\nNo editor contents, clipboard, form token, Acts or other private text are sent. The server/model may incur cost and retain this synthetic prompt. No retries. The response will not be displayed or inserted. Cancellation may not stop server work.</string>
+    <string name="agent_test_send" translatable="false">Send one saved-connection test</string>
+    <string name="agent_test_waiting" translatable="false">Testing saved connection (45 second UI limit). No response will be displayed or inserted. Close, uncheck opt-in, save or forget to cancel locally; server work may continue.</string>
+    <string name="agent_test_busy" translatable="false">Diagnostic busy: the previous request or transport cleanup has not finished. No new test can be sent, even after reopening settings. Wait for cleanup; if the provider/transport will not return, force-stop this app to recover. No automatic retries. Server work may continue even after force-stop.</string>
+    <string name="agent_test_not_sent" translatable="false">Test not sent. Confirm a new test to send the fixed prompt using saved configuration.</string>
+    <string name="agent_test_cancelled" translatable="false">Test cancelled locally. Server work may continue and incur cost. Saved configuration is unchanged unless you save or forget.</string>
+    <string name="agent_test_config_changed" translatable="false">Test not sent: saved configuration changed or became unavailable. Review saved settings and confirm a fresh test.</string>
+    <string name="agent_test_success" translatable="false">Success: saved connection returned a valid final answer. Response discarded; nothing displayed or inserted.</string>
+    <string name="agent_test_auth" translatable="false">Authentication refused (HTTP 401/403). Check the saved API-server key and profile permissions.</string>
+    <string name="agent_test_route" translatable="false">Route not found (HTTP 404). Check the saved server-root URL and profile/proxy path; omit /v1.</string>
+    <string name="agent_test_quota" translatable="false">Quota or rate limit (HTTP 429). Check server/provider usage limits before testing again.</string>
+    <string name="agent_test_server" translatable="false">Server/provider failure (HTTP 5xx). Check gateway and model/provider availability.</string>
+    <string name="agent_test_http" translatable="false">Unexpected HTTP status or redirect. Check the HTTPS API route; redirects are not followed.</string>
+    <string name="agent_test_tls" translatable="false">TLS trust/handshake failed. Check the Android-trusted certificate and HTTPS configuration. No insecure bypass is available.</string>
+    <string name="agent_test_dns" translatable="false">DNS lookup failed. Check the phone network, VPN/tailnet connection and saved hostname.</string>
+    <string name="agent_test_timeout" translatable="false">Test timed out (45 second UI limit; network timeouts may occur sooner). Check phone VPN/tailnet and server/model availability. Server work may continue. A new test is blocked until request and transport cleanup finish; if stuck, force-stop this app. No automatic retries; another confirmed test may incur cost.</string>
+    <string name="agent_test_network" translatable="false">Network connection failed. Check phone connectivity, VPN/tailnet and service availability.</string>
+    <string name="agent_test_unexpected" translatable="false">No valid final answer. Expected one non-streaming assistant text answer with finish_reason stop; malformed, oversized, truncated and tool-only replies are refused.</string>
     <string name="agent_saved" translatable="false">Saved. Use Agent in the expanded keyboard toolbar.</string>
     <string name="agent_forgotten" translatable="false">Disabled; configuration deleted.</string>
     <string name="agent_config_error" translatable="false">Not saved. Check the HTTPS URL and paste a valid token, or unlock the device and try again. Keystore storage must be available.</string>

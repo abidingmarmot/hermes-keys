@@ -7,14 +7,24 @@ import javax.net.ssl.HttpsURLConnection
 class AgentClient(private val openConnection: (java.net.URL) -> HttpsURLConnection = {
     it.openConnection() as HttpsURLConnection
 }) {
+    /** Carries only a numeric status, never a URL, response body or server message. */
+    class HttpStatusException(val status: Int) : IllegalStateException("HTTP request rejected")
+
     @Volatile private var connection: HttpsURLConnection? = null
     @Volatile private var cancelled = false
 
     fun cancel() {
         cancelled = true
         // Disconnect may block on some TLS stacks; do not do it on the IME thread.
-        val active = connection
-        Thread { active?.disconnect() }.start()
+        Thread { cancelAndDisconnect() }.start()
+    }
+
+    /** Blocking transport cleanup: callers must use a worker, never the UI/IME thread.
+     * Diagnostics own a bounded cleanup worker and must track this call through completion.
+     */
+    internal fun cancelAndDisconnect() {
+        cancelled = true
+        connection?.disconnect()
     }
 
     fun complete(config: AgentCredentials.Config, prompt: String): AgentProtocol.Result {
@@ -35,12 +45,12 @@ class AgentClient(private val openConnection: (java.net.URL) -> HttpsURLConnecti
             conn.setRequestProperty("Authorization", "Bearer ${config.token}")
             conn.setFixedLengthStreamingMode(body.size)
             conn.outputStream.use { it.write(body) }
-            check(conn.responseCode in 200..299)
+            val status = conn.responseCode
+            if (status !in 200..299) throw HttpStatusException(status)
             check(!cancelled)
             return conn.inputStream.use { AgentProtocol.parse(AgentProtocol.readBounded(it)) }
         } finally {
-            conn.disconnect()
-            connection = null
+            try { conn.disconnect() } finally { connection = null }
         }
     }
 }

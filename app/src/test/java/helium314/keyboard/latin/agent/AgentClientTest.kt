@@ -2,6 +2,7 @@
 package helium314.keyboard.latin.agent
 
 import android.app.Application
+import android.os.Looper
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.mockito.Mockito.*
@@ -9,9 +10,11 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import java.io.ByteArrayOutputStream
 import java.net.SocketTimeoutException
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 import javax.net.ssl.HttpsURLConnection
-import kotlin.test.assertEquals
-import kotlin.test.assertFails
+import kotlin.test.*
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [28], application = Application::class)
@@ -41,15 +44,19 @@ class AgentClientTest {
     }
 
     @Test fun redirectsAuthAndServerErrorsNeverReadBodyOrRetry() {
-        for (status in listOf(301, 302, 307, 308, 401, 403, 429, 500)) {
+        for (status in listOf(301, 302, 307, 308, 400, 401, 403, 404, 429, 500, 599)) {
             val connection = mock(HttpsURLConnection::class.java)
             `when`(connection.outputStream).thenReturn(ByteArrayOutputStream())
             `when`(connection.responseCode).thenReturn(status)
             var calls = 0
             val client = AgentClient { calls++; connection }
-            assertFails { client.complete(config, "Prompt") }
+            val failure = assertFailsWith<AgentClient.HttpStatusException> { client.complete(config, "Prompt") }
+            assertEquals(status, failure.status)
+            assertEquals("HTTP request rejected", failure.message)
             assertEquals(1, calls)
             verify(connection, never()).inputStream
+            verify(connection, never()).errorStream
+            verify(connection, never()).responseMessage
             verify(connection).disconnect()
         }
     }
@@ -64,6 +71,51 @@ class AgentClientTest {
         client.cancel()
         assertFails { client.complete(config, "Prompt") }
         assertEquals(0, calls)
+    }
+
+    @Test fun publicCancelStillReturnsOffMainWhileRealDisconnectAndRequestAreBlocked() {
+        val connection = mock(HttpsURLConnection::class.java)
+        val requesting = CountDownLatch(1)
+        val releaseRequest = CountDownLatch(1)
+        val disconnecting = CountDownLatch(1)
+        val releaseDisconnect = CountDownLatch(1)
+        val cleanup = AtomicReference<Thread>()
+        val result = AtomicReference<Result<AgentProtocol.Result>>()
+        `when`(connection.outputStream).thenReturn(ByteArrayOutputStream())
+        `when`(connection.responseCode).thenAnswer {
+            requesting.countDown()
+            check(releaseRequest.await(5, TimeUnit.SECONDS))
+            200
+        }
+        doAnswer {
+            assertNotEquals(Looper.getMainLooper().thread, Thread.currentThread())
+            cleanup.compareAndSet(null, Thread.currentThread())
+            disconnecting.countDown()
+            check(releaseDisconnect.await(5, TimeUnit.SECONDS))
+            null
+        }.`when`(connection).disconnect()
+        val client = AgentClient { connection }
+        val worker = Thread { result.set(runCatching { client.complete(config, "Prompt") }) }
+        worker.start()
+        try {
+            assertTrue(requesting.await(5, TimeUnit.SECONDS))
+            client.cancel() // The IME's existing API must not wait for disconnect.
+            assertTrue(disconnecting.await(5, TimeUnit.SECONDS))
+            assertTrue(worker.isAlive)
+            assertTrue(cleanup.get().isAlive)
+            releaseRequest.countDown()
+            verify(connection, timeout(5000).times(2)).disconnect() // Request's finally also owns cleanup.
+            assertTrue(worker.isAlive)
+            verify(connection, never()).inputStream // Cancelled response must not be accepted.
+        } finally {
+            releaseRequest.countDown()
+            releaseDisconnect.countDown()
+            worker.join(5000)
+            cleanup.get()?.join(5000)
+        }
+        assertFalse(worker.isAlive)
+        assertFalse(cleanup.get().isAlive)
+        assertTrue(result.get().isFailure)
     }
 
     @Test fun timeoutAndCancelledFinalAnswersNeverReturnSuccess() {
