@@ -27,12 +27,16 @@ import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
+import org.robolectric.annotation.LooperMode
+import org.robolectric.shadows.ShadowToast
+import java.time.Duration
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlin.test.*
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [28], application = Application::class)
+@LooperMode(LooperMode.Mode.PAUSED)
 class LocalActsFlowTest {
     private fun dialog(controller: AgentController) = AgentController::class.java.getDeclaredField("dialog")
         .apply { isAccessible = true }.get(controller) as AlertDialog?
@@ -326,6 +330,142 @@ class LocalActsFlowTest {
             }
         }
         h.activity.finish()
+    }
+
+    private fun awaitEditorWorkers() {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+        while (Thread.getAllStackTraces().keys.any { it.isAlive && it.name.startsWith("hermes-editor-") }) {
+            check(System.nanoTime() < deadline) { "Synthetic editor worker did not exit" }
+            Thread.sleep(5)
+        }
+        shadowOf(Looper.getMainLooper()).idle()
+    }
+
+    @Test fun blockedDisconnectHoldsEditorSlotAcrossTimeoutCancelAndImeRecreation() {
+        for (action in listOf("timeout", "cancel", "destroy")) boundedCancellation(action, requestFinishesFirst = true)
+    }
+
+    @Test fun blockedRequestHoldsEditorSlotAcrossTimeoutCancelAndImeRecreation() {
+        for (action in listOf("timeout", "cancel", "destroy")) boundedCancellation(action, requestFinishesFirst = false)
+    }
+
+    private fun boundedCancellation(action: String, requestFinishesFirst: Boolean) {
+        val h = Harness()
+        val fresh = Harness() // A distinct controller/IME must share the process-wide slot.
+        val entered = CountDownLatch(1)
+        val releaseRequest = CountDownLatch(1)
+        val disconnecting = CountDownLatch(1)
+        val releaseDisconnect = CountDownLatch(1)
+        val config = AgentCredentials.Config("https://example.invalid", "unit-test-placeholder", true)
+        val settings = mock(SettingsValues::class.java)
+        SettingsValues::class.java.getField("mSpaceActionPopup").apply { isAccessible = true }.setBoolean(settings, true)
+        mockStatic(Settings::class.java).use { static ->
+            static.`when`<SettingsValues> { Settings.getValues() }.thenReturn(settings)
+            mockConstruction(AgentCredentials::class.java) { store, _ -> `when`(store.load()).thenReturn(config) }.use {
+                mockConstruction(LocalActStore::class.java) { store, _ -> `when`(store.load()).thenReturn(h.acts) }.use {
+                    mockConstruction(AgentClient::class.java) { client, _ ->
+                        `when`(client.complete(any<AgentCredentials.Config>() ?: config, anyString())).thenAnswer {
+                            assertNotEquals(Looper.getMainLooper().thread, Thread.currentThread())
+                            entered.countDown()
+                            check(releaseRequest.await(15, TimeUnit.SECONDS))
+                            AgentProtocol.Result("private-late-response", "stop")
+                        }
+                        doAnswer {
+                            assertNotEquals(Looper.getMainLooper().thread, Thread.currentThread())
+                            disconnecting.countDown()
+                            check(releaseDisconnect.await(15, TimeUnit.SECONDS))
+                            null
+                        }.`when`(client).cancelAndDisconnect()
+                    }.use { clients ->
+                        try {
+                            // A consent already open in another controller must also fail at Send.
+                            fresh.controller.show()
+                            val competingPreview = requireNotNull(dialog(fresh.controller))
+                            when (action) {
+                                "timeout" -> {
+                                    requireNotNull(h.controller.prepareActionPopup()).release(1)
+                                    shadowOf(Looper.getMainLooper()).idle()
+                                }
+                                "cancel" -> { h.controller.showActs(); h.pick() }
+                                else -> h.controller.show()
+                            }
+                            val preview = requireNotNull(dialog(h.controller))
+                            preview.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+                            val run = AgentController::class.java.getDeclaredField("requestRun")
+                                .apply { isAccessible = true }.get(h.controller) as AgentEditorRequest.Run
+                            assertTrue(entered.await(5, TimeUnit.SECONDS))
+                            competingPreview.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+                            assertTrue(texts(competingPreview.window!!.decorView).contains(h.activity.getString(R.string.agent_request_busy)))
+                            assertEquals(1, clients.constructed().size)
+                            when (action) {
+                                "timeout" -> {
+                                    shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(45))
+                                    assertTrue(texts(preview.window!!.decorView).contains(h.activity.getString(R.string.agent_timeout)))
+                                    assertFalse(preview.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled)
+                                }
+                                "cancel" -> preview.getButton(AlertDialog.BUTTON_NEGATIVE).performClick()
+                                else -> {
+                                    // LatinIME.onDestroy uses invalidate; do not start the native IME in this fixture.
+                                    h.controller.invalidate()
+                                    h.activity.finish()
+                                }
+                            }
+                            shadowOf(Looper.getMainLooper()).idle() // Dialog button listeners are posted.
+                            assertTrue(disconnecting.await(5, TimeUnit.SECONDS), "Cleanup did not start for $action")
+                            synchronized(AgentEditorRequest) { assertNull(run.callback) }
+                            val worker = Thread.getAllStackTraces().keys.single { it.isAlive && it.name == "hermes-editor-request" }
+                            val cleanup = Thread.getAllStackTraces().keys.single { it.isAlive && it.name == "hermes-editor-close" }
+                            fun rejectAttempts() {
+                                run.cancel()
+                                preview.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+                                competingPreview.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+                                clearInvocations(fresh.connection)
+                                fresh.controller.show()
+                                fresh.controller.showActs()
+                                assertNull(fresh.controller.prepareActionPopup())
+                                assertNull(dialog(fresh.controller))
+                                verify(fresh.connection, never()).getExtractedText(any(), anyInt())
+                                assertEquals(fresh.activity.getString(R.string.agent_request_busy), ShadowToast.getTextOfLatestToast())
+                                assertNull(AgentEditorRequest.start(config, "never queued") { _, _ -> fail("Busy callback") })
+                                assertEquals(1, clients.constructed().size)
+                                verify(fresh.ime, never()).insertAgentResult(anyString(), any())
+                            }
+                            repeat(5) {
+                                rejectAttempts()
+                                assertEquals(2, Thread.getAllStackTraces().keys.count { it.isAlive && it.name.startsWith("hermes-editor-") })
+                            }
+                            if (requestFinishesFirst) {
+                                releaseRequest.countDown(); worker.join(5000); assertFalse(worker.isAlive)
+                            } else {
+                                releaseDisconnect.countDown(); cleanup.join(5000); assertFalse(cleanup.isAlive)
+                            }
+                            shadowOf(Looper.getMainLooper()).idle()
+                            repeat(5) { assertTrue(AgentEditorRequest.isBusy()); rejectAttempts() }
+                            assertTrue(Thread.getAllStackTraces().keys.count { it.isAlive && it.name.startsWith("hermes-editor-") } <= 1)
+                            verify(clients.constructed().single(), times(1)).cancelAndDisconnect()
+                            verify(clients.constructed().single(), times(1)).complete(eq(config) ?: config, anyString())
+                            verify(h.ime, never()).insertAgentResult(anyString(), any())
+                            releaseRequest.countDown(); releaseDisconnect.countDown()
+                            awaitEditorWorkers()
+                            assertFalse(AgentEditorRequest.isBusy())
+                            assertNull(dialog(fresh.controller)) // No abandoned callback/result or automatic retry.
+                            fresh.controller.show()
+                            assertEquals(1, clients.constructed().size) // Recovery requires fresh preview AND Send.
+                            requireNotNull(dialog(fresh.controller)).getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+                            awaitEditorWorkers()
+                            assertEquals(2, clients.constructed().size)
+                            assertTrue(texts(requireNotNull(dialog(fresh.controller)).window!!.decorView).any { it.contains("private-late-response") })
+                            verify(fresh.ime, never()).insertAgentResult(anyString(), any())
+                        } finally {
+                            releaseRequest.countDown(); releaseDisconnect.countDown()
+                            h.controller.invalidate(); fresh.controller.invalidate()
+                            awaitEditorWorkers()
+                            h.activity.finish(); fresh.activity.finish()
+                        }
+                    }
+                }
+            }
+        }
     }
 
     @Test fun changedSnapshotAfterPreviewAndCancelDoNotSendOrInsert() {

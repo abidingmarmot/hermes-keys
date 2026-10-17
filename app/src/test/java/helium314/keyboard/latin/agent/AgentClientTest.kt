@@ -68,12 +68,12 @@ class AgentClientTest {
         assertFails { client.complete(AgentCredentials.Config("http://example.invalid", config.token, true), "Prompt") }
         assertFails { client.complete(AgentCredentials.Config(config.base, "bad\nheader", true), "Prompt") }
         assertFails { client.complete(config, "x".repeat(4001)) }
-        client.cancel()
+        Thread { client.cancelAndDisconnect() }.apply { start(); join(5000); assertFalse(isAlive) }
         assertFails { client.complete(config, "Prompt") }
         assertEquals(0, calls)
     }
 
-    @Test fun publicCancelStillReturnsOffMainWhileRealDisconnectAndRequestAreBlocked() {
+    @Test fun ownedCleanupWorkerTracksRealDisconnectWhileRequestIsBlocked() {
         val connection = mock(HttpsURLConnection::class.java)
         val requesting = CountDownLatch(1)
         val releaseRequest = CountDownLatch(1)
@@ -99,7 +99,8 @@ class AgentClientTest {
         worker.start()
         try {
             assertTrue(requesting.await(5, TimeUnit.SECONDS))
-            client.cancel() // The IME's existing API must not wait for disconnect.
+            // Slot owners, not AgentClient, create and track the cleanup worker.
+            Thread { client.cancelAndDisconnect() }.start()
             assertTrue(disconnecting.await(5, TimeUnit.SECONDS))
             assertTrue(worker.isAlive)
             assertTrue(cleanup.get().isAlive)

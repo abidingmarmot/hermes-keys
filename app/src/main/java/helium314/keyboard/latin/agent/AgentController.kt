@@ -22,7 +22,7 @@ import helium314.keyboard.latin.utils.getPlatformDialogThemeContext
 class AgentController(private val ime: LatinIME) {
     private val handler = Handler(Looper.getMainLooper())
     private var dialog: AlertDialog? = null
-    private var client: AgentClient? = null
+    private var requestRun: AgentEditorRequest.Run? = null
     private var generation = 0
     private var selectionStart = -1
     private var selectionEnd = -1
@@ -36,8 +36,8 @@ class AgentController(private val ime: LatinIME) {
         }
         actionPopup = null
         generation++
-        client?.cancel()
-        client = null
+        requestRun?.cancel()
+        requestRun = null
         handler.removeCallbacksAndMessages(null)
         val previous = dialog
         dialog = null
@@ -63,6 +63,7 @@ class AgentController(private val ime: LatinIME) {
         invalidate()
         if (Build.VERSION.SDK_INT < 23 || !Settings.getValues().mSpaceActionPopup ||
             !allowed() || !ime.isInputViewShown) return null
+        if (AgentEditorRequest.isBusy()) { toast(R.string.agent_request_busy); return null }
         if (runCatching { AgentCredentials(ime).load() }.getOrNull()?.enabled != true) return null
         val pins = runCatching { LocalActStore(ime).load().filter { it.pinned }.take(3) }.getOrNull() ?: return null
         val connection = ime.currentInputConnection ?: return null
@@ -97,6 +98,7 @@ class AgentController(private val ime: LatinIME) {
         invalidate()
         if (!allowed()) { toast(R.string.agent_blocked); return }
         if (Build.VERSION.SDK_INT < 23) { toast(R.string.agent_requires_23); return }
+        if (AgentEditorRequest.isBusy()) { toast(R.string.agent_request_busy); return }
         // Capture before opening the picker; never silently retarget an Act to a changed editor.
         val connection = ime.currentInputConnection ?: return
         val editor = ime.currentInputEditorInfo
@@ -130,6 +132,7 @@ class AgentController(private val ime: LatinIME) {
         invalidate()
         if (!allowed()) { toast(R.string.agent_blocked); return }
         if (Build.VERSION.SDK_INT < 23) { toast(R.string.agent_requires_23); return }
+        if (AgentEditorRequest.isBusy()) { toast(R.string.agent_request_busy); return }
         val config = runCatching { AgentCredentials(ime).load() }.getOrNull()
         if (config?.enabled != true) {
             val setup = AlertDialog.Builder(getPlatformDialogThemeContext(ime))
@@ -165,63 +168,52 @@ class AgentController(private val ime: LatinIME) {
             .setPositiveButton(R.string.agent_send, null)
             .setNegativeButton(android.R.string.cancel) { _, _ -> invalidate() }.create()
         if (!display(preview)) return
+        var sent = false
         preview.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+            if (sent) return@setOnClickListener
             if (!current() || AgentEditor.capture(connection) != snapshot) {
                 invalidate(); toast(R.string.agent_blocked); return@setOnClickListener
             }
+            sent = true // A retry always needs a fresh preview and explicit consent.
             preview.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = false
             content.text = ime.getString(R.string.agent_waiting, prompt)
-            val request = AgentClient()
-            client = request
-            val timeout = Runnable {
-                if (current() && client === request) {
-                    request.cancel()
-                    client = null
-                    content.text = ime.getString(R.string.agent_timeout, prompt)
-                    preview.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = true
-                }
-            }
-            handler.postDelayed(timeout, 45000)
-            Thread({
-                val result = runCatching { request.complete(config, prompt) }.getOrNull()
-                handler.post {
-                    if (!current() || client !== request) return@post
-                    handler.removeCallbacks(timeout)
-                    client = null
-                    if (result == null) {
-                        content.text = ime.getString(R.string.agent_request_error, prompt)
-                        preview.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = true
-                    } else {
-                        preview.dismiss()
-                        val answer = TextView(getPlatformDialogThemeContext(ime)).apply {
-                            setPadding(24, 16, 24, 16)
-                            text = ime.getString(R.string.agent_result_preview, result.finishReason, result.text)
-                            setTextIsSelectable(true)
-                        }
-                        val confirm = AlertDialog.Builder(getPlatformDialogThemeContext(ime))
-                            .setTitle(R.string.agent_result).setView(ScrollView(ime).apply { addView(answer) })
-                            .setPositiveButton(R.string.agent_insert, null)
-                            .setNegativeButton(android.R.string.cancel) { _, _ -> invalidate() }.create()
-                        hasResult = true
-                        if (!display(confirm)) return@post
-                        var attempted = false
-                        confirm.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                            if (attempted) return@setOnClickListener
-                            attempted = true
-                            // Never retry an uncertain/partial insertion; keep the result copyable.
-                            confirm.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = false
-                            val inserted = current() && AgentEditor.capture(connection) == snapshot &&
-                                runCatching { ime.insertAgentResult(result.text, snapshot) }.getOrDefault(false)
-                            if (inserted) {
-                                confirm.dismiss()
-                                invalidate()
-                            } else {
-                                answer.text = ime.getString(R.string.agent_insert_error, result.text)
-                            }
+            requestRun = AgentEditorRequest.start(config, prompt) { result, timedOut ->
+                if (!current()) return@start
+                requestRun = null
+                if (result == null) {
+                    content.text = ime.getString(if (timedOut) R.string.agent_timeout else R.string.agent_request_error)
+                } else {
+                    preview.dismiss()
+                    val answer = TextView(getPlatformDialogThemeContext(ime)).apply {
+                        setPadding(24, 16, 24, 16)
+                        text = ime.getString(R.string.agent_result_preview, result.finishReason, result.text)
+                        setTextIsSelectable(true)
+                    }
+                    val confirm = AlertDialog.Builder(getPlatformDialogThemeContext(ime))
+                        .setTitle(R.string.agent_result).setView(ScrollView(ime).apply { addView(answer) })
+                        .setPositiveButton(R.string.agent_insert, null)
+                        .setNegativeButton(android.R.string.cancel) { _, _ -> invalidate() }.create()
+                    hasResult = true
+                    if (!display(confirm)) return@start
+                    var attempted = false
+                    confirm.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                        if (attempted) return@setOnClickListener
+                        attempted = true
+                        // Never retry an uncertain/partial insertion; keep the result copyable.
+                        confirm.getButton(AlertDialog.BUTTON_POSITIVE).isEnabled = false
+                        val inserted = current() && AgentEditor.capture(connection) == snapshot &&
+                            runCatching { ime.insertAgentResult(result.text, snapshot) }.getOrDefault(false)
+                        if (inserted) {
+                            confirm.dismiss()
+                            invalidate()
+                        } else {
+                            answer.text = ime.getString(R.string.agent_insert_error, result.text)
                         }
                     }
                 }
-            }, "hermes-keyboard-request").start()
+            }
+            // Another controller may have claimed the slot after this preview opened.
+            if (requestRun == null) content.text = ime.getString(R.string.agent_request_busy)
         }
     }
 

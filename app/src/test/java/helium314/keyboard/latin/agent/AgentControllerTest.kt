@@ -18,10 +18,15 @@ import org.mockito.Mockito.*
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
+import org.robolectric.annotation.LooperMode
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.test.*
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [28], application = Application::class)
+@LooperMode(LooperMode.Mode.PAUSED)
 class AgentControllerTest {
     private fun field(name: String) = AgentController::class.java.getDeclaredField(name).apply { isAccessible = true }
     private fun display(controller: AgentController, dialog: AlertDialog): Boolean =
@@ -71,6 +76,44 @@ class AgentControllerTest {
         verify(button).setEnabled(false)
         verify(dialog, never()).dismiss()
         assertSame(dialog, field("dialog").get(controller))
+    }
+
+    @Test fun invalidateDetachesEvenCompletedWorkerBeforeQueuedCallbackDelivery() {
+        val controller = AgentController(mock(LatinIME::class.java))
+        val config = AgentCredentials.Config("https://example.invalid", "unit-test-placeholder", true)
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val worker = AtomicReference<Thread>()
+        var delivered = false
+        mockConstruction(AgentClient::class.java) { client, _ ->
+            `when`(client.complete(any<AgentCredentials.Config>() ?: config, anyString())).thenAnswer {
+                worker.set(Thread.currentThread())
+                entered.countDown()
+                check(release.await(5, TimeUnit.SECONDS))
+                AgentProtocol.Result("discarded private response", "stop")
+            }
+        }.use { clients ->
+            val run = requireNotNull(AgentEditorRequest.start(config, "private prompt") { _, _ -> delivered = true })
+            field("requestRun").set(controller, run)
+            try {
+                assertTrue(entered.await(5, TimeUnit.SECONDS))
+                release.countDown()
+                worker.get().join(5000)
+                assertFalse(worker.get().isAlive)
+                assertFalse(AgentEditorRequest.isBusy())
+                synchronized(AgentEditorRequest) { assertNotNull(run.callback) }
+                controller.invalidate()
+                synchronized(AgentEditorRequest) { assertNull(run.callback) }
+                shadowOf(Looper.getMainLooper()).idle()
+                assertFalse(delivered)
+                verify(clients.constructed().single(), never()).cancelAndDisconnect()
+            } finally {
+                release.countDown()
+                worker.get()?.join(5000)
+                controller.invalidate()
+                shadowOf(Looper.getMainLooper()).idle()
+            }
+        }
     }
 
     @Test fun cancellationDropsPendingCallbacksAndSurvivesDetachedDialog() {

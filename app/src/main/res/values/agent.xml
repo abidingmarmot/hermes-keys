@@ -50,8 +50,9 @@
     <string name="agent_send_preview" translatable="false">Send only this text to %1$s?\n\n%2$s</string>
     <string name="agent_send" translatable="false">Send prompt</string>
     <string name="agent_waiting" translatable="false">Waiting (45 second limit). Cancel leaves your field unchanged; server work may continue.\n\n%1$s</string>
-    <string name="agent_timeout" translatable="false">Timed out after 45 seconds. Nothing inserted. Server work may continue; sending again starts another request.\n\nPrompt:\n%1$s</string>
-    <string name="agent_request_error" translatable="false">Request failed, timed out, or returned a non-success/invalid answer. Nothing inserted. Check server/token/network. Sending again starts a new request; server work may still be running.\n\nPrompt:\n%1$s</string>
+    <string name="agent_request_busy" translatable="false">Agent busy: the previous editor request or transport cleanup has not finished. Nothing sent. Wait, then reopen Agent or Acts and confirm Send again. If the transport will not return, force-stop this app to recover. Typing is still available. No automatic retries; server work may continue even after force-stop.</string>
+    <string name="agent_timeout" translatable="false">Timed out after 45 seconds. Nothing inserted. A new send is blocked until the request and transport cleanup finish. Close this dialog and wait, then reopen Agent or Acts for a fresh Send confirmation. If stuck, force-stop this app. No automatic retries; server work may continue even after force-stop.</string>
+    <string name="agent_request_error" translatable="false">Request failed, timed out, or returned a non-success/invalid answer. Nothing inserted. Check server/token/network. Close this dialog and reopen Agent or Acts for a fresh Send confirmation. No automatic retries; server work may still be running.</string>
     <string name="agent_result" translatable="false">Review agent result</string>
     <string name="agent_result_preview" translatable="false">Finish reason: %1$s. Insert after the selection/cursor? Original text will be kept. Review carefully: model output is untrusted.\n\n%2$s</string>
     <string name="agent_insert" translatable="false">Insert after selection</string>

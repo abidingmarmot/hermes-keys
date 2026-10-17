@@ -13,14 +13,8 @@ class AgentClient(private val openConnection: (java.net.URL) -> HttpsURLConnecti
     @Volatile private var connection: HttpsURLConnection? = null
     @Volatile private var cancelled = false
 
-    fun cancel() {
-        cancelled = true
-        // Disconnect may block on some TLS stacks; do not do it on the IME thread.
-        Thread { cancelAndDisconnect() }.start()
-    }
-
     /** Blocking transport cleanup: callers must use a worker, never the UI/IME thread.
-     * Diagnostics own a bounded cleanup worker and must track this call through completion.
+     * Editor requests and diagnostics each own a bounded cleanup worker and track completion.
      */
     internal fun cancelAndDisconnect() {
         cancelled = true
