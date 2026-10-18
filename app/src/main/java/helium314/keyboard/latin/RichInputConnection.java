@@ -298,6 +298,14 @@ public final class RichInputConnection implements PrivateCommandPerformer {
         }
     }
 
+    /**
+     * Finish the editor's composing span after reloading caches at a moved cursor.
+     * Does not change cached text, including when the editor rejects the request.
+     */
+    public boolean finishComposingTextOnEditorAndReturnSuccess() {
+        return isConnected() && mIC.finishComposingText();
+    }
+
     public void finishComposingText() {
         if (DEBUG_BATCH_NESTING) checkBatchEdit();
         if (DEBUG_PREVIOUS_TEXT) checkConsistencyForDebug();
@@ -983,6 +991,8 @@ public final class RichInputConnection implements PrivateCommandPerformer {
      */
     public boolean isBelatedExpectedUpdate(final int oldSelStart, final int newSelStart,
             final int oldSelEnd, final int newSelEnd, final int composingSpanStart, final int composingSpanEnd) {
+        // Without an expected cursor, even a same-position callback must reach cache recovery.
+        if (!isCursorPositionKnown()) return false;
         // This update is "belated" if we are expecting it. That is, mExpectedSelStart and
         // mExpectedSelEnd match the new values that the TextView is updating TO.
         if (mExpectedSelStart == newSelStart && mExpectedSelEnd == newSelEnd) {

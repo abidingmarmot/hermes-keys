@@ -37,6 +37,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.Implementation
 import org.robolectric.annotation.Implements
+import org.robolectric.shadow.api.Shadow
 import org.robolectric.shadows.ShadowLog
 import java.util.*
 import kotlin.math.min
@@ -157,8 +158,13 @@ class InputLogicTest {
     @Test fun combineHangul() {
         val ko = SubtypeSettings.getResourceSubtypesForLocale("ko".constructLocale()).first()
         latinIME.switchToSubtype(ko)
+        currentScript = ScriptUtils.SCRIPT_HANGUL
         chainInput("ㅂㄱㅑ")
         assertEquals("ㅂ갸", text)
+        assertEquals(2, getCursorPosition())
+        functionalKeyPress(KeyCode.DELETE)
+        assertEquals("ㅂㄱ", text)
+        assertEquals(2, getCursorPosition())
     }
 
     @Test fun emojiHangul() {
@@ -168,19 +174,150 @@ class InputLogicTest {
         assertEquals("\uD83E\uDD70", text)
     }
 
-    // todo: make it work, but it might not be that simple because adding is done in combiner
-    //  https://github.com/HeliBorg/HeliBoard/issues/214
-    @Test fun insertLetterIntoWordHangulFails() {
-        if (BuildConfig.BUILD_TYPE == "runTests") return
+    // https://github.com/HeliBorg/HeliBoard/issues/214
+    @Test fun insertLetterIntoWordHangul() {
         latinIME.switchToSubtype(SubtypeSettings.getResourceSubtypesForLocale("ko".constructLocale()).first())
+        // The KeyboardSwitcher shadow does not update its script when the subtype changes.
+        currentScript = ScriptUtils.SCRIPT_HANGUL
         chainInput("ㅛㅎㄹㅎㅕㅛ")
         setCursorPosition(3)
-        input('ㄲ') // fails, as expected from the hangul issue when processing the event in onCodeInput
+        inputAndAssertEditor('ㄲ', "ㅛㅎㄹㄲ혀ㅛ", 4)
+        assertEquals(3 to 4, composingStart to composingEnd)
         assertEquals("ㅛㅎㄹㄲ혀ㅛ", getWordAtCursor())
         assertEquals("ㅛㅎㄹㄲ혀ㅛ", getTextFromConnection())
         assertEquals("ㅛㅎㄹㄲ혀ㅛ", textBeforeCursor + textAfterCursor)
         assertEquals(4, getCursorPosition())
         assertEquals(4, cursor)
+
+        inputAndAssertEditor('ㅏ', "ㅛㅎㄹ까혀ㅛ", 4)
+        functionalKeyPress(KeyCode.DELETE)
+        assertEquals(Triple("ㅛㅎㄹㄲ혀ㅛ", 4, 4), Triple(text, selectionStart, selectionEnd))
+        functionalKeyPress(KeyCode.DELETE)
+        assertEquals(Triple("ㅛㅎㄹ혀ㅛ", 3, 3), Triple(text, selectionStart, selectionEnd))
+    }
+
+    @Test fun insertLetterInFrontOfWordHangul() {
+        latinIME.switchToSubtype(SubtypeSettings.getResourceSubtypesForLocale("ko".constructLocale()).first())
+        currentScript = ScriptUtils.SCRIPT_HANGUL
+        chainInput("ㅛㅎㄹㅎㅕㅛ")
+        setCursorPosition(0)
+        inputAndAssertEditor('ㄲ', "ㄲㅛㅎㄹ혀ㅛ", 1)
+        assertEquals(0 to 1, composingStart to composingEnd)
+        inputAndAssertEditor('ㅏ', "까ㅛㅎㄹ혀ㅛ", 1)
+        functionalKeyPress(KeyCode.DELETE)
+        assertEquals(Triple("ㄲㅛㅎㄹ혀ㅛ", 1, 1), Triple(text, selectionStart, selectionEnd))
+        functionalKeyPress(KeyCode.DELETE)
+        assertEquals(Triple("ㅛㅎㄹ혀ㅛ", 0, 0), Triple(text, selectionStart, selectionEnd))
+    }
+
+    @Test fun deleteInsideWordHangul() {
+        latinIME.switchToSubtype(SubtypeSettings.getResourceSubtypesForLocale("ko".constructLocale()).first())
+        currentScript = ScriptUtils.SCRIPT_HANGUL
+        chainInput("ㅛㅎㄹㅎㅕㅛ")
+        setCursorPosition(3)
+        functionalKeyPress(KeyCode.DELETE)
+        assertEquals(Triple("ㅛㅎ혀ㅛ", 2, 2), Triple(text, selectionStart, selectionEnd))
+    }
+
+    @Test fun deleteInFrontOfWordHangul() {
+        latinIME.switchToSubtype(SubtypeSettings.getResourceSubtypesForLocale("ko".constructLocale()).first())
+        currentScript = ScriptUtils.SCRIPT_HANGUL
+        chainInput("ㅂ ㅛㅎㄹㅎㅕㅛ")
+        setCursorPosition(2) // Front of the composing word, with a preceding space to delete.
+        functionalKeyPress(KeyCode.DELETE)
+        assertEquals(Triple("ㅂㅛㅎㄹ혀ㅛ", 1, 1), Triple(text, selectionStart, selectionEnd))
+        assertEquals(0, ShadowInputMethodService.batchEdit)
+        inputAndAssertEditor('ㄲ', "ㅂㄲㅛㅎㄹ혀ㅛ", 2)
+        inputAndAssertEditor('ㅏ', "ㅂ까ㅛㅎㄹ혀ㅛ", 2)
+    }
+
+    @Test fun frontAndMiddleEditLatin() {
+        chainInput("hello")
+        setCursorPosition(0)
+        inputAndAssertEditor('i', "ihello", 1)
+        setCursorPosition(3)
+        inputAndAssertEditor('a', "iheallo", 4)
+        functionalKeyPress(KeyCode.DELETE)
+        assertEquals(Triple("ihello", 3, 3), Triple(text, selectionStart, selectionEnd))
+        assertEquals(0, ShadowInputMethodService.batchEdit)
+    }
+
+    @Test fun replaceSelectionInWordHangul() {
+        latinIME.switchToSubtype(SubtypeSettings.getResourceSubtypesForLocale("ko".constructLocale()).first())
+        currentScript = ScriptUtils.SCRIPT_HANGUL
+        chainInput("ㅛㅎㄹㅎㅕㅛ")
+        setCursorPosition(3, 4)
+        inputAndAssertEditor('ㄲ', "ㅛㅎㄹㄲㅛ", 4)
+    }
+
+    @Test fun replaceSelectionInWordLatin() {
+        chainInput("hello")
+        setCursorPosition(1, 4)
+        inputAndAssertEditor('i', "hio", 2)
+    }
+
+    @Test fun middleEditHangulFailsClosedOnCacheReloadFailure() {
+        assertHangulMiddleEditFailsClosed(failedReload = 1)
+    }
+
+    @Test fun middleEditHangulFailsClosedOnSecondCacheReloadFailure() {
+        assertHangulMiddleEditFailsClosed(failedReload = 2)
+    }
+
+    @Test fun middleEditHangulFailsClosedOnFinishFailure() {
+        assertHangulMiddleEditFailsClosed(failedReload = 0)
+    }
+
+    @Test fun checkedFinishRejectionPreservesCachedComposition() {
+        chainInput("hello")
+        val oldCachedComposition = connectionComposingText
+        val oldSpan = composingStart to composingEnd
+        val shadow = Shadow.extract<ShadowInputMethodService>(latinIME)
+        val field = ShadowInputMethodService::class.java.getDeclaredField("ic").apply { isAccessible = true }
+        val original = field.get(shadow) as InputConnection
+        field.set(shadow, object : InputConnectionWrapper(original, false) {
+            override fun finishComposingText() = false
+        })
+        connection.beginBatchEdit()
+        try {
+            assertEquals(false, connection.finishComposingTextOnEditorAndReturnSuccess())
+            assertEquals(oldCachedComposition, connectionComposingText)
+            assertEquals(oldSpan, composingStart to composingEnd)
+            assertEquals(Triple("hello", 5, 5), Triple(text, selectionStart, selectionEnd))
+        } finally {
+            connection.endBatchEdit()
+            field.set(shadow, original)
+        }
+        assertEquals(0, ShadowInputMethodService.batchEdit)
+    }
+
+    @Test fun sharedResetStillFinishesAfterSecondReloadFailure() {
+        chainInput("hello")
+        val shadow = Shadow.extract<ShadowInputMethodService>(latinIME)
+        val field = ShadowInputMethodService::class.java.getDeclaredField("ic").apply { isAccessible = true }
+        val original = field.get(shadow) as InputConnection
+        var reloads = 0
+        var finishes = 0
+        field.set(shadow, object : InputConnectionWrapper(original, false) {
+            override fun getTextBeforeCursor(n: Int, flags: Int): CharSequence? =
+                if (++reloads == 2) null else super.getTextBeforeCursor(n, flags)
+            override fun finishComposingText(): Boolean {
+                finishes++
+                return super.finishComposingText()
+            }
+        })
+        try {
+            // A differing requested selection exercises the shared method's second reload.
+            assertEquals(true, connection.resetCachesUponCursorMoveAndReturnSuccess(3, 3, true))
+            assertEquals(2, reloads)
+            assertEquals(1, finishes)
+            assertEquals(-1 to -1, composingStart to composingEnd)
+            assertEquals(Triple("hello", 5, 5), Triple(text, selectionStart, selectionEnd))
+            assertEquals(false, connection.isCursorPositionKnown)
+            assertEquals(0, ShadowInputMethodService.batchEdit)
+        } finally {
+            field.set(shadow, original)
+        }
     }
 
     // see issue 1447
@@ -736,6 +873,122 @@ class InputLogicTest {
     }
 
     private fun chainInput(text: String) = text.forEach { input(it.code) }
+
+    private fun assertHangulMiddleEditFailsClosed(failedReload: Int) {
+        latinIME.switchToSubtype(SubtypeSettings.getResourceSubtypesForLocale("ko".constructLocale()).first())
+        currentScript = ScriptUtils.SCRIPT_HANGUL
+        chainInput("ㅛㅎㄹㅎㅕㅛ")
+        setCursorPosition(3)
+        val oldWord = composer.typedWord
+        val oldSpan = composingStart to composingEnd
+        // Substitute only the synthetic editor connection, leaving InputLogic and its caches real.
+        val shadow = Shadow.extract<ShadowInputMethodService>(latinIME)
+        val field = ShadowInputMethodService::class.java.getDeclaredField("ic").apply { isAccessible = true }
+        val original = field.get(shadow) as InputConnection
+        var reloads = 0
+        var finishes = 0
+        var edits = 0
+        val failing = object : InputConnectionWrapper(original, false) {
+            override fun getTextBeforeCursor(n: Int, flags: Int): CharSequence? {
+                reloads++
+                if (failedReload == 2 && reloads == 1) {
+                    // Simulate cached selection invalidation during the first editor read, so
+                    // reset must retry with its captured authoritative selection arguments.
+                    for (name in listOf("mExpectedSelStart", "mExpectedSelEnd")) {
+                        RichInputConnection::class.java.getDeclaredField(name).apply {
+                            isAccessible = true
+                            setInt(connection, -1)
+                        }
+                    }
+                }
+                return if (failedReload != 0 && reloads == failedReload) null
+                    else super.getTextBeforeCursor(n, flags)
+            }
+            override fun finishComposingText(): Boolean {
+                finishes++
+                return false
+            }
+            override fun setComposingText(text: CharSequence, cursor: Int): Boolean {
+                edits++
+                return super.setComposingText(text, cursor)
+            }
+            override fun commitText(text: CharSequence, cursor: Int): Boolean {
+                edits++
+                return super.commitText(text, cursor)
+            }
+            override fun deleteSurroundingText(before: Int, after: Int): Boolean {
+                edits++
+                return super.deleteSurroundingText(before, after)
+            }
+            override fun sendKeyEvent(event: android.view.KeyEvent): Boolean {
+                edits++
+                return super.sendKeyEvent(event)
+            }
+            override fun setSelection(start: Int, end: Int): Boolean {
+                edits++
+                return super.setSelection(start, end)
+            }
+            override fun setComposingRegion(start: Int, end: Int): Boolean {
+                edits++
+                return super.setComposingRegion(start, end)
+            }
+        }
+        fun assertRefused(event: Event) {
+            val transaction = inputLogic.onCodeInput(settingsValues, event, CapsMode.OFF,
+                currentScript, latinIME.mHandler)
+            assertEquals(Triple("ㅛㅎㄹ혀ㅛ", 3, 3), Triple(text, selectionStart, selectionEnd))
+            assertEquals(oldSpan, composingStart to composingEnd)
+            assertEquals(oldWord, composer.typedWord)
+            assertEquals(false, transaction.didAffectContents())
+            assertEquals(0, edits, "Refused input must not send editor mutations")
+            assertEquals(0, ShadowInputMethodService.batchEdit)
+        }
+        val insert = Event.createEventForCodePointFromUnknownSource('ㄲ'.code)
+        val delete = Event.createSoftwareKeypressEvent(Event.NOT_A_CODE_POINT, KeyCode.DELETE,
+            0, Constants.NOT_A_COORDINATE, Constants.NOT_A_COORDINATE, false)
+        field.set(shadow, failing)
+        try {
+            repeat(2) { // Repeated input must not get past the guard after a failed reset either.
+                assertRefused(insert)
+                assertRefused(delete)
+            }
+            assertEquals(if (failedReload == 0) 4 else 0, finishes)
+            assertEquals(if (failedReload == 0) 4 else failedReload, reloads)
+        } finally {
+            field.set(shadow, original)
+        }
+        if (failedReload != 0) {
+            assertEquals(false, connection.isCursorPositionKnown)
+            repeat(2) { // Reconnection alone must not permit edits using an unknown cursor.
+                assertRefused(insert)
+                assertRefused(delete)
+            }
+            assertEquals(false, connection.isCursorPositionKnown)
+            // A fresh callback may report the same selection: it is not a belated typing update.
+            latinIME.onUpdateSelection(3, 3, 3, 3, composingStart, composingEnd)
+            handleMessages()
+            assertEquals(true, connection.isCursorPositionKnown)
+            assertEquals(3, getCursorPosition())
+            checkConnectionConsistency()
+        }
+        inputAndAssertEditor('ㄲ', "ㅛㅎㄹㄲ혀ㅛ", 4)
+        inputAndAssertEditor('ㅏ', "ㅛㅎㄹ까혀ㅛ", 4)
+        functionalKeyPress(KeyCode.DELETE)
+        assertEquals(Triple("ㅛㅎㄹㄲ혀ㅛ", 4, 4), Triple(text, selectionStart, selectionEnd))
+        functionalKeyPress(KeyCode.DELETE)
+        assertEquals(Triple("ㅛㅎㄹ혀ㅛ", 3, 3), Triple(text, selectionStart, selectionEnd))
+    }
+
+    private fun inputAndAssertEditor(char: Char, expectedText: String, expectedCursor: Int) {
+        // Check the editor before the generic helper's invariants: starting a new Hangul
+        // composition here legitimately changes the composer's relative cursor position.
+        latinIME.onEvent(Event.createEventForCodePointFromUnknownSource(char.code))
+        handleMessages()
+        assertEquals(Triple(expectedText, expectedCursor, expectedCursor),
+            Triple(text, selectionStart, selectionEnd), "Editor text and selection")
+        assertEquals(0, ShadowInputMethodService.batchEdit)
+        checkConnectionConsistency()
+    }
 
     private fun input(char: Char) = input(char.code)
 

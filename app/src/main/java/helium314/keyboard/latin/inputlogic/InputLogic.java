@@ -498,6 +498,35 @@ public final class InputLogic {
         if (GestureDataGatheringKt.useBackgroundGathering && mWordComposer.isComposingWord() && mWordComposer.isCursorFrontOrMiddleOfComposingWord())
             BackgroundGatheringCache.INSTANCE.onEditWord(mWordComposer.getTypedWord());
 
+        if ("hangul".equals(mWordComposer.getCombiningSpec())
+                && mWordComposer.isComposingWord()
+                && mWordComposer.isCursorFrontOrMiddleOfComposingWord()
+                && !mConnection.hasSelection()
+                && (!event.isFunctionalKeyEvent() || event.getKeyCode() == KeyCode.DELETE)) {
+            // Hangul consumes characters and Delete before the normal front/middle reset paths.
+            // Finish the old span without committing it again or moving the editor's cursor.
+            // A reconnected editor can supply text without recovering the absolute cursor.
+            // Wait for an authoritative selection update before resetting or running the combiner.
+            if (!mConnection.isCursorPositionKnown()
+                    || !mConnection.resetCachesUponCursorMoveAndReturnSuccess(
+                    mConnection.getExpectedSelectionStart(), mConnection.getExpectedSelectionEnd(),
+                    false /* shouldFinishComposition */)
+                    // The shared reset can return true even when its second reload failed.
+                    || !mConnection.isCursorPositionKnown()
+                    || !mConnection.finishComposingTextOnEditorAndReturnSuccess()) {
+                // Keep the composer intact so a later edit must retry rather than replace a stale span.
+                return new InputTransaction(settingsValues, event, SystemClock.uptimeMillis(),
+                        mSpaceState, getActualCapsMode(settingsValues, keyboardCapsMode));
+            }
+            if (!mWordComposer.isCursorInFrontOfComposingWord()
+                    || event.getKeyCode() == KeyCode.DELETE) {
+                unlearnWord(mWordComposer.getTypedWord(), settingsValues,
+                        DictionaryFacilitator.UnlearnEvent.BACKSPACE);
+                mSuggestionStripViewAccessor.setNeutralSuggestionStrip();
+            }
+            resetComposingState(true /* alsoResetLastComposedWord */);
+        }
+
         Event processedEvent = mWordComposer.processEvent(event);
         InputTransaction inputTransaction = new InputTransaction(settingsValues,
                 processedEvent, SystemClock.uptimeMillis(), mSpaceState,

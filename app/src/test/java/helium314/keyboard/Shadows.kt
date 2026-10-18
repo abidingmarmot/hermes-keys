@@ -166,7 +166,7 @@ class ShadowInputMethodService {
     fun isInputViewShown() = true // otherwise selection updates will do nothing
 
     // essentially this is the text field we're editing in
-    private val ic = object : InputConnection {
+    private val ic: InputConnection = object : InputConnection {
         // pretty clear (though this may be slow depending on the editor)
         // bad return value here is likely the cause for that weird bug improved/fixed by fixIncorrectLength
         override fun getTextBeforeCursor(p0: Int, p1: Int): CharSequence = textBeforeCursor.take(p0)
