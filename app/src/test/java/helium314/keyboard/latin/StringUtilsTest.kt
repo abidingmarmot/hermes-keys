@@ -11,6 +11,7 @@ import helium314.keyboard.latin.common.getFullEmojiAtEnd
 import helium314.keyboard.latin.common.getTouchedWordRange
 import helium314.keyboard.latin.common.isEmoji
 import helium314.keyboard.latin.common.isSingleGrapheme
+import helium314.keyboard.latin.common.lastGrapheme
 import helium314.keyboard.latin.common.moveStepsToCharCount
 import helium314.keyboard.latin.common.nonWordCodePointAndNoSpaceBeforeCursor
 import helium314.keyboard.latin.common.splitOnWhitespace
@@ -22,8 +23,16 @@ import helium314.keyboard.latin.utils.TextRange
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import java.text.BreakIterator
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
+import kotlin.test.assertNotSame
+import kotlin.test.assertSame
+import kotlin.test.assertTrue
 
 // todo: actually this test could/should be significantly expanded...
 @RunWith(RobolectricTestRunner::class)
@@ -119,6 +128,58 @@ class StringUtilsTest {
         checkTextRange("@@@", "@@@", spUrl, script, 0, 6)
         checkTextRange("a...", "", spUrl, script, 0, 4)
         checkTextRange("@@@", "", spUrl, script, 0, 3)
+    }
+
+    @Test fun graphemeIteratorIsThreadLocal() {
+        // Inspect the existing cache without exposing a production test hook. Ordered worker
+        // calls prove isolation even without a race: they must not change the main iterator.
+        @Suppress("UNCHECKED_CAST")
+        val cache = Class.forName("helium314.keyboard.latin.common.StringUtilsKt")
+            .getDeclaredField("LocalBreakIterator").apply { isAccessible = true }
+            .get(null) as ThreadLocal<BreakIterator>
+
+        fun exercise(): BreakIterator {
+            assertFalse("".isSingleGrapheme)
+            assertTrue("a".isSingleGrapheme)
+            assertTrue("e\u0301".isSingleGrapheme)
+            val iterator = assertNotNull(cache.get(), "Operation must initialize this thread's iterator")
+            assertEquals(2, iterator.text.endIndex)
+            assertFalse("ab".isSingleGrapheme)
+            assertTrue("🎄".isSingleGrapheme)
+            assertEquals("", "".lastGrapheme)
+            assertEquals("a", "a".lastGrapheme)
+            assertEquals("e\u0301", "abe\u0301".lastGrapheme)
+            assertEquals(4, iterator.text.endIndex)
+            assertEquals("🎄", "a🎄".lastGrapheme)
+            assertEquals(3, iterator.text.endIndex)
+            assertEquals(0, moveStepsToCharCount("", 1))
+            assertEquals(0, moveStepsToCharCount("abc", 0))
+            assertEquals(3, moveStepsToCharCount("ae\u0301bc", 2))
+            assertEquals(5, iterator.text.endIndex)
+            assertEquals(-4, moveStepsToCharCount("ae\u0301bc", -3))
+            assertEquals(5, moveStepsToCharCount("ae\u0301bc", 10))
+            assertEquals(-5, moveStepsToCharCount("ae\u0301bc", -10))
+            assertSame(iterator, cache.get())
+            return iterator
+        }
+
+        val mainIterator = exercise()
+        mainIterator.setText("main sentinel")
+        mainIterator.next()
+        val mainPosition = mainIterator.current()
+        val worker = Executors.newSingleThreadExecutor()
+        try {
+            val workerIterator = worker.submit<BreakIterator> { exercise() }.get(5, TimeUnit.SECONDS)
+            assertNotSame(mainIterator, workerIterator)
+            assertEquals("main sentinel".length, mainIterator.text.endIndex)
+            assertEquals(mainPosition, mainIterator.current())
+            // A second call on the same live worker must reuse its own cached instance.
+            assertSame(workerIterator, worker.submit<BreakIterator> { exercise() }.get(5, TimeUnit.SECONDS))
+            assertSame(mainIterator, exercise())
+        } finally {
+            worker.shutdownNow()
+            assertTrue(worker.awaitTermination(5, TimeUnit.SECONDS))
+        }
     }
 
     @Test fun singleGrapheme() {
